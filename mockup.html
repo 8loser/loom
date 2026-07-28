@@ -1,0 +1,1316 @@
+<title>loom control center</title>
+<style>
+  :root {
+    --bg: #f4f7f6;
+    --surface: #ffffff;
+    --surface-2: #e9efee;
+    --border: #d7e0de;
+    --border-strong: #bfcdca;
+    --text: #141d1c;
+    --muted: #5d6d6b;
+    --accent: #0f7466;
+    --accent-soft: #d7ebe7;
+    --ok: #3d7a36;
+    --ok-soft: #e0eedd;
+    --warn: #94670f;
+    --warn-soft: #f5e9cf;
+    --crit: #a63d2c;
+    --crit-soft: #f6e0db;
+    --idle: #8a9997;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1211;
+      --surface: #141b1a;
+      --surface-2: #1a2322;
+      --border: #253130;
+      --border-strong: #354443;
+      --text: #dbe5e3;
+      --muted: #7f918f;
+      --accent: #4ec2ae;
+      --accent-soft: #123330;
+      --ok: #62b055;
+      --ok-soft: #16290f;
+      --warn: #d09b3a;
+      --warn-soft: #302408;
+      --crit: #d76a55;
+      --crit-soft: #331612;
+      --idle: #4e5f5d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1211;
+    --surface: #141b1a;
+    --surface-2: #1a2322;
+    --border: #253130;
+    --border-strong: #354443;
+    --text: #dbe5e3;
+    --muted: #7f918f;
+    --accent: #4ec2ae;
+    --accent-soft: #123330;
+    --ok: #62b055;
+    --ok-soft: #16290f;
+    --warn: #d09b3a;
+    --warn-soft: #302408;
+    --crit: #d76a55;
+    --crit-soft: #331612;
+    --idle: #4e5f5d;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f7f6;
+    --surface: #ffffff;
+    --surface-2: #e9efee;
+    --border: #d7e0de;
+    --border-strong: #bfcdca;
+    --text: #141d1c;
+    --muted: #5d6d6b;
+    --accent: #0f7466;
+    --accent-soft: #d7ebe7;
+    --ok: #3d7a36;
+    --ok-soft: #e0eedd;
+    --warn: #94670f;
+    --warn-soft: #f5e9cf;
+    --crit: #a63d2c;
+    --crit-soft: #f6e0db;
+    --idle: #8a9997;
+  }
+
+  * { box-sizing: border-box; }
+
+  :root {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans TC", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .label {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* ---------- top bar ---------- */
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 5px 16px;
+    min-height: 46px;
+    flex-wrap: wrap;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+  }
+
+  .ws {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    background: var(--surface-2);
+    cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .ws .caret { color: var(--muted); font-size: 9px; }
+
+  .meters { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .meter { display: flex; align-items: baseline; gap: 6px; }
+  .meter .v {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+  }
+
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    appearance: none;
+    border: 1px solid transparent;
+    background: none;
+    color: var(--muted);
+    padding: 4px 11px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .tab:hover { color: var(--text); background: var(--surface-2); }
+  .tab[aria-selected="true"] {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* ---------- attention strip ---------- */
+
+  .attention {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+  }
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 16px;
+    border-left: 3px solid transparent;
+  }
+  .banner + .banner { border-top: 1px solid var(--border); }
+  .banner.ready-to-merge { background: var(--ok-soft); border-left-color: var(--ok); }
+  .banner.stuck { background: var(--crit-soft); border-left-color: var(--crit); }
+
+  .banner .tag {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .banner.ready-to-merge .tag { color: var(--ok); }
+  .banner.stuck .tag { color: var(--crit); }
+
+  .banner .what {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .banner .why { color: var(--muted); font-size: 12.5px; }
+  .banner .acts { margin-left: auto; display: flex; gap: 6px; }
+
+  .btn {
+    appearance: none;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 3px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+    font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.08); color: var(--surface); }
+
+  /* ---------- main split ---------- */
+
+  .main { display: grid; grid-template-columns: minmax(0, 1fr) 372px; min-height: 0; }
+  .panes { min-height: 0; overflow: hidden; }
+  .panes > .pane { display: none; }
+  .panes > .pane.on { display: grid; height: 100%; min-height: 0; }
+
+  /* ---------- board ---------- */
+
+  .board { overflow: auto; min-width: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(178px, 1fr));
+    min-width: 900px;
+  }
+
+  .colhead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg);
+    padding: 9px 12px 7px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+  }
+
+  .lane {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    appearance: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 11px 12px 9px;
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  .lane:hover { background: var(--accent-soft); }
+  .lane:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .lane.on { box-shadow: inset 2px 0 0 var(--accent); }
+  .lane .name {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .lane .branch {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .lane .spacer { margin-left: auto; }
+
+  .prog { display: flex; align-items: center; gap: 7px; }
+  .bar { width: 84px; height: 3px; background: var(--border-strong); border-radius: 2px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .prog .c {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cell {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    min-height: 62px;
+  }
+  .cell:nth-child(6n + 5) { border-right: none; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--idle);
+    border-radius: 3px;
+    padding: 7px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    width: 100%;
+  }
+  .card:hover { border-color: var(--border-strong); border-left-color: var(--accent); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card.live { border-left-color: var(--accent); }
+  .card.retry { border-left-color: var(--warn); }
+  .card.halted { border-left-color: var(--crit); }
+  .card.manual { border-left-color: var(--warn); border-left-style: dashed; }
+  .card.shipped { border-left-color: var(--ok); opacity: 0.72; }
+  .card.on {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .card .id {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+  .card .id b { color: var(--accent); font-weight: 600; }
+  .card .foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .card .foot .hot { color: var(--warn); }
+  .card .foot .bad { color: var(--crit); }
+  .card .foot .good { color: var(--ok); }
+  .card .cardacts { margin-top: 2px; }
+  .card .cardacts .btn { font-size: 11px; padding: 2px 8px; }
+
+  .pulse {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent);
+    animation: beat 1.6s ease-in-out infinite;
+    flex: none;
+  }
+  @keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+  .queued { color: var(--idle); font-size: 11.5px; padding: 3px 2px; }
+
+  .fold {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    appearance: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    cursor: pointer;
+    padding: 10px 12px;
+    color: var(--muted);
+    font: inherit;
+  }
+  .fold:hover { background: var(--surface-2); color: var(--text); }
+  .fold:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .fold .tw { font-size: 8px; flex: none; }
+  .fold .ttl {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    flex: none;
+  }
+  .fold .names {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--idle);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  /* ---------- detail ---------- */
+
+  .detail {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .dpanel {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    height: 100%;
+    min-height: 0;
+  }
+  .dpanel[hidden] { display: none; }
+
+  .cmts { overflow: auto; padding: 11px 0 14px; min-height: 0; }
+  .cmts .ch { padding: 0 14px 8px; }
+  .cmt {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: start;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cmt p { margin: 0; font-size: 12.5px; }
+  .cmt .where {
+    display: block;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .cmt .btn { font-size: 11px; padding: 3px 9px; white-space: nowrap; }
+
+  .dfoot {
+    display: flex;
+    gap: 7px;
+    padding: 11px 14px;
+    border-top: 1px solid var(--border);
+  }
+  .dfoot[hidden] { display: none; }
+  .dfoot .btn { flex: 1; }
+
+  .note-run { padding: 14px; color: var(--muted); font-size: 12.5px; }
+
+  .dhead { padding: 13px 14px 11px; border-bottom: 1px solid var(--border); }
+  .dhead h2 {
+    margin: 3px 0 0;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .dhead .sub {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 5px;
+  }
+
+  .facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 5px 14px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    align-items: baseline;
+  }
+  .facts dd {
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .facts dd.warnish { color: var(--warn); }
+
+  .stream { overflow: auto; padding: 10px 0 14px; min-height: 0; }
+  .stream .st-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 14px 8px;
+  }
+  .line {
+    display: grid;
+    grid-template-columns: 52px 40px 1fr;
+    gap: 8px;
+    padding: 2.5px 14px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .line:hover { background: var(--surface-2); }
+  .line .t { color: var(--idle); font-variant-numeric: tabular-nums; }
+  .line .k { color: var(--muted); }
+  .line .m { word-break: break-word; }
+  .line.tool .k { color: var(--accent); }
+  .line.say .m { color: var(--muted); }
+  .line.diff .m .plus { color: var(--ok); }
+  .line.diff .m .minus { color: var(--crit); }
+  .line.now .m { color: var(--text); }
+
+  /* ---------- chat ---------- */
+
+  .chat { grid-template-columns: minmax(0, 1fr) 372px; }
+  .thread { overflow: auto; padding: 20px 24px 24px; min-width: 0; }
+  .turn { max-width: 62ch; margin: 0 0 20px; }
+  .turn .who {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .turn.me .who { color: var(--accent); }
+  .turn p { margin: 0 0 9px; }
+  .turn ol { margin: 0 0 9px; padding-left: 20px; }
+  .turn li { margin-bottom: 3px; }
+  .turn code {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--surface-2);
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
+
+  .composer {
+    border-top: 1px solid var(--border);
+    padding: 10px 24px 14px;
+    background: var(--surface);
+  }
+  .composer .box {
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 9px 11px;
+    color: var(--muted);
+    background: var(--bg);
+  }
+
+  .draft { border-left: 1px solid var(--border); background: var(--surface); overflow: auto; }
+  .draft .dh { padding: 13px 14px; border-bottom: 1px solid var(--border); }
+  .draft .dh h3 {
+    margin: 4px 0 0;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .ilist { list-style: none; margin: 0; padding: 6px 0; }
+  .ilist li {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 14px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ilist li .seq { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .ilist li .nm { flex: 1; word-break: break-word; }
+  .e2e {
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    flex: none;
+  }
+  .e2e.human { background: var(--accent-soft); color: var(--accent); }
+  .draft .go { padding: 13px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .draft .go .note { font-size: 11.5px; color: var(--muted); }
+
+  /* ---------- settings ---------- */
+
+  .settings { grid-template-columns: 214px minmax(0, 1fr); }
+  .settings > * { min-height: 0; overflow: auto; }
+
+  .wsrail { border-right: 1px solid var(--border); background: var(--surface); }
+  .wsrail .hd { padding: 13px 14px 8px; }
+  .wsrail ul { list-style: none; margin: 0; padding: 0; }
+  .wsrail li { border-bottom: 1px solid var(--border); }
+  .wsrail li:first-child { border-top: 1px solid var(--border); }
+  .wsrail .item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    appearance: none;
+    border: 0;
+    border-left: 2px solid transparent;
+    background: none;
+    cursor: pointer;
+    padding: 9px 14px;
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .wsrail .item:hover { background: var(--surface-2); }
+  .wsrail .item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .wsrail .item[aria-current="true"] {
+    border-left-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .wsrail .item .path {
+    display: block;
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .wsrail .item .dot {
+    display: inline-block;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .wsrail .add { padding: 12px 14px; }
+  .wsrail .add .btn { width: 100%; }
+
+  .grphd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .grphd .label { margin: 0; }
+  .sheet { max-width: 680px; padding: 26px 24px 40px; }
+  .sheet h2 {
+    margin: 0 0 4px;
+    font-size: 17px;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  .sheet .lede { color: var(--muted); margin: 0 0 22px; max-width: 58ch; }
+  .field {
+    display: grid;
+    grid-template-columns: 168px 1fr;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .field .in {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 5px 8px;
+    background: var(--bg);
+  }
+  .field .in.ro {
+    border-style: dashed;
+    border-color: var(--border);
+    background: transparent;
+    color: var(--muted);
+  }
+  .sheet .grp { margin-top: 26px; }
+  .sheet .grp .label { display: block; margin-bottom: 6px; }
+
+  .proles { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  .prole {
+    appearance: none;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--muted);
+    border-radius: 3px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+  }
+  .prole:hover { color: var(--text); }
+  .prole:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .prole[aria-current="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .ptext {
+    margin: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    background: var(--bg);
+    padding: 11px 12px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+  .ptext b { color: var(--accent); font-weight: 400; }
+
+  .pvars {
+    margin: 8px 0 0;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .pfoot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px solid var(--border);
+  }
+  .pfoot .lock {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .pfoot .btn { margin-left: auto; }
+</style>
+
+<div class="app">
+
+  <header class="topbar">
+    <span class="brand">loom</span>
+
+    <button class="ws" type="button">
+      <span>clinic-web</span>
+      <span class="caret">▼</span>
+    </button>
+
+    <nav class="tabs" role="tablist" aria-label="檢視">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="pane-board" data-pane="board">看板</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="pane-chat" data-pane="chat">討論</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="pane-settings" data-pane="settings">設定</button>
+    </nav>
+
+    <div class="meters">
+      <span class="meter"><span class="label">同時執行</span><span class="v">2 / 2</span></span>
+      <span class="meter"><span class="label">今日 token</span><span class="v">輸入 8.1M <span style="color:var(--idle)">·</span> 輸出 274k</span></span>
+      <span class="meter"><span class="label">今日花費</span><span class="v">$4.18</span></span>
+      <span class="meter"><span class="pulse" aria-hidden="true"></span><span class="v">執行中</span></span>
+      <button class="btn" type="button">暫停</button>
+    </div>
+  </header>
+
+  <section class="attention" aria-label="需要你處理">
+    <div class="banner ready-to-merge">
+      <span class="tag">可以收了</span>
+      <span class="what">appointment-detail-sheet</span>
+      <span class="why">5 個 issue 全過，整體 e2e 綠燈，落後 main 0 個 commit</span>
+      <span class="acts">
+        <button class="btn" type="button">看 diff</button>
+        <button class="btn primary" type="button">合併到 main</button>
+      </span>
+    </div>
+    <div class="banner stuck">
+      <span class="tag">卡住了</span>
+      <span class="what">onboarding-defaults / 02-seed-onboarding-state</span>
+      <span class="why">已改三次仍未通過 review，第三次是從基準重寫的</span>
+      <span class="acts">
+        <button class="btn" type="button">先收目前進度</button>
+        <button class="btn" type="button">恢復</button>
+      </span>
+    </div>
+  </section>
+
+  <div class="panes">
+
+    <!-- ======================= 看板 ======================= -->
+    <div class="pane main on" id="pane-board" role="tabpanel" aria-label="看板">
+
+      <div class="board">
+        <div class="grid">
+
+          <div class="colhead"><span class="label">待處理</span></div>
+          <div class="colhead"><span class="label">實作中</span></div>
+          <div class="colhead"><span class="label">審查中</span></div>
+          <div class="colhead"><span class="label">測試中</span></div>
+          <div class="colhead"><span class="label">完成</span></div>
+
+          <!-- lane 1 -->
+          <button class="lane" type="button" data-state="running"
+                  data-spec="mobile-slot-settings" data-branch="spec/mobile-slot-settings"
+                  data-cost="$1.34" data-tok="輸入 1.8M · 輸出 61k" data-behind="0 個 code commit"
+                  data-progress="3 / 7 issue 完成" data-elapsed="1h 12m"
+                  data-extra="目前 04 實作中，最後一次 rebase 在 12 分鐘前">
+            <span class="name">mobile-slot-settings</span>
+            <span class="branch">spec/mobile-slot-settings</span>
+            <span class="spacer"></span>
+            <span class="prog">
+              <span class="bar"><i style="width:43%"></i></span>
+              <span class="c">3 / 7</span>
+              <span class="c">已跑 1h 12m</span>
+            </span>
+          </button>
+
+          <div class="cell">
+            <div class="card" tabindex="0" role="button"><span class="id"><b>05</b> migrate-modals-to-form-modal</span></div>
+            <div class="card" tabindex="0" role="button"><span class="id"><b>06</b> mobile-layout</span></div>
+            <div class="card" tabindex="0" role="button">
+              <span class="id"><b>07</b> mobile-e2e-coverage</span>
+              <span class="foot"><span class="e2e">E2E</span></span>
+            </div>
+          </div>
+          <div class="cell">
+            <div class="card live retry on" tabindex="0" role="button">
+              <span class="id"><b>04</b> split-shared-components-and-data-hook</span>
+              <span class="foot">
+                <span class="pulse" aria-hidden="true"></span>
+                <span>coder 4m12s</span>
+                <span class="hot">第 2 / 3 次</span>
+              </span>
+            </div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>01</b> fix-e2e-page-object</span></div>
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>02</b> extract-slot-timeline-module</span></div>
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>03</b> shared-timeline-range</span></div>
+          </div>
+
+          <!-- lane 2 -->
+          <button class="lane" type="button" data-state="running"
+                  data-spec="mobile-appointment-week-strip" data-branch="spec/mobile-appointment-week-strip"
+                  data-cost="$0.72" data-tok="輸入 940k · 輸出 33k" data-behind="0 個 code commit"
+                  data-progress="2 / 7 issue 完成" data-elapsed="38m"
+                  data-extra="目前 03 審查中，最後一次 rebase 在 6 分鐘前">
+            <span class="name">mobile-appointment-week-strip</span>
+            <span class="branch">spec/mobile-appointment-week-strip</span>
+            <span class="spacer"></span>
+            <span class="prog">
+              <span class="bar"><i style="width:29%"></i></span>
+              <span class="c">2 / 7</span>
+              <span class="c">已跑 38m</span>
+            </span>
+          </button>
+
+          <div class="cell">
+            <div class="card" tabindex="0" role="button"><span class="id"><b>04</b> extract-gap-computation</span></div>
+            <div class="card" tabindex="0" role="button"><span class="id"><b>05</b> extract-day-timeline</span></div>
+            <div class="card" tabindex="0" role="button"><span class="id"><b>06</b> distinguish-load-failure-from-empty</span></div>
+            <div class="card" tabindex="0" role="button"><span class="id"><b>07</b> slot-settings-time-format-validation</span></div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="card live" tabindex="0" role="button">
+              <span class="id"><b>03</b> phantom-occupancy-row</span>
+              <span class="foot">
+                <span class="pulse" aria-hidden="true"></span>
+                <span>reviewer 51s</span>
+                <span>+184 −61</span>
+              </span>
+            </div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>01</b> week-strip-today-first</span></div>
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>02</b> occupancy-dots-union</span></div>
+          </div>
+
+          <!-- lane 3 -->
+          <button class="lane" type="button" data-state="blocked"
+                  data-spec="onboarding-defaults" data-branch="spec/onboarding-defaults"
+                  data-cost="$1.96" data-tok="輸入 2.4M · 輸出 88k" data-behind="2 個 code commit"
+                  data-progress="1 / 3 issue 完成" data-elapsed="停住 2h 4m"
+                  data-extra="02 已改三次仍未通過 review，第三次是從基準重寫的">
+            <span class="name">onboarding-defaults</span>
+            <span class="branch">spec/onboarding-defaults</span>
+            <span class="spacer"></span>
+            <span class="prog">
+              <span class="bar"><i style="width:33%; background:var(--crit)"></i></span>
+              <span class="c">1 / 3</span>
+              <span class="c">停在 02</span>
+            </span>
+          </button>
+
+          <div class="cell">
+            <div class="card manual" tabindex="0" role="button">
+              <span class="id"><b>03</b> default-clinic-hours</span>
+              <span class="foot"><span class="hot">等你動手</span></span>
+              <span class="foot cardacts">
+                <button class="btn" type="button">標為完成</button>
+                <button class="btn" type="button">退回 ready</button>
+              </span>
+            </div>
+            <div class="queued">不依賴 02，但要人決定預設值</div>
+          </div>
+          <div class="cell">
+            <div class="card halted" tabindex="0" role="button">
+              <span class="id"><b>02</b> seed-onboarding-state</span>
+              <span class="foot"><span class="bad">3 / 3 次未通過</span></span>
+            </div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>01</b> onboarding-state-machine</span></div>
+          </div>
+
+          <!-- lane 4 -->
+          <button class="lane" type="button" data-state="mergeable"
+                  data-spec="appointment-detail-sheet" data-branch="spec/appointment-detail-sheet"
+                  data-cost="$2.14" data-tok="輸入 2.9M · 輸出 96k" data-behind="0 個 code commit"
+                  data-progress="5 / 5 issue 完成" data-elapsed="2h 51m">
+            <span class="name">appointment-detail-sheet</span>
+            <span class="branch">spec/appointment-detail-sheet</span>
+            <span class="spacer"></span>
+            <span class="prog">
+              <span class="bar"><i style="width:100%; background:var(--ok)"></i></span>
+              <span class="c">5 / 5</span>
+              <span class="c">e2e 綠燈</span>
+            </span>
+          </button>
+
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell">
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>01</b> sheet-shell</span></div>
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>02</b> patient-summary-block</span></div>
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>03</b> status-transitions</span></div>
+            <div class="card shipped" tabindex="0" role="button"><span class="id"><b>04</b> sheet-a11y</span></div>
+            <div class="card shipped" tabindex="0" role="button">
+              <span class="id"><b>05</b> detail-sheet-e2e</span>
+              <span class="foot"><span class="good">e2e 通過</span></span>
+            </div>
+          </div>
+
+          <button class="fold" type="button">
+            <span class="tw" aria-hidden="true">▶</span>
+            <span class="ttl">草稿 3</span>
+            <span class="names">patient-search-filters · export-schedule-csv · notification-digest</span>
+          </button>
+
+          <button class="fold" type="button">
+            <span class="tw" aria-hidden="true">▶</span>
+            <span class="ttl">已合併 12</span>
+            <span class="names">slot-conflict-warning · staff-colour-legend · week-strip-keyboard-nav · appointment-status-chips · timezone-display · 還有 7 個</span>
+          </button>
+
+        </div>
+      </div>
+
+      <aside class="detail">
+
+        <div class="dpanel" id="d-spec" hidden>
+          <div class="dhead">
+            <span class="label" id="sp-state">可以合併</span>
+            <h2 id="sp-name">appointment-detail-sheet</h2>
+            <div class="sub" id="sp-branch">spec/appointment-detail-sheet</div>
+          </div>
+
+          <dl class="facts">
+            <dt class="label">進度</dt><dd id="sp-prog">5 / 5 issue 完成</dd>
+            <dt class="label">整體 e2e</dt><dd id="sp-e2e">綠燈 · 3m 41s</dd>
+            <dt class="label">落後 main</dt><dd id="sp-behind">0 個 code commit</dd>
+            <dt class="label">總耗時</dt><dd id="sp-elapsed">2h 51m</dd>
+            <dt class="label">總花費</dt><dd id="sp-cost">$2.14</dd>
+            <dt class="label">總 token</dt><dd id="sp-tok">輸入 2.9M <span style="color:var(--idle)">·</span> 輸出 96k</dd>
+          </dl>
+
+          <div class="cmts" id="sp-body">
+            <div class="ch"><span class="label">整體 review 意見 3 條</span></div>
+
+            <div class="cmt">
+              <div>
+                <p>SlotCard 與 DetailHeader 各自實作了一份時間格式化，行為相同。</p>
+                <span class="where">issue 02 · issue 04</span>
+              </div>
+              <button class="btn" type="button">轉成 issue</button>
+            </div>
+
+            <div class="cmt">
+              <div>
+                <p>issue 02 加的 formatPatientName 在 04 改寫 header 之後沒有呼叫者了。</p>
+                <span class="where">src/utils/patient.ts</span>
+              </div>
+              <button class="btn" type="button">轉成 issue</button>
+            </div>
+
+            <div class="cmt">
+              <div>
+                <p>狀態轉移的 guard 分散在三個檔案，集中在一處會比較好追。</p>
+                <span class="where">issue 03</span>
+              </div>
+              <button class="btn" type="button">轉成 issue</button>
+            </div>
+          </div>
+
+          <div class="dfoot" id="sp-foot">
+            <button class="btn" type="button">看完整 diff</button>
+            <button class="btn primary" type="button">合併到 main</button>
+          </div>
+        </div>
+
+        <div class="dpanel" id="d-issue">
+        <div class="dhead">
+          <span class="label">實作中 · mobile-slot-settings</span>
+          <h2>04 split-shared-components-and-data-hook</h2>
+          <div class="sub">worktree ~/.loom/worktrees/clinic-web/mobile-slot-settings</div>
+        </div>
+
+        <dl class="facts">
+          <dt class="label">基準</dt><dd>a3f19c2</dd>
+          <dt class="label">嘗試</dt><dd class="warnish">第 2 次 / 共 3 次</dd>
+          <dt class="label">退回原因</dt><dd>reviewer：hook 仍持有 render 狀態</dd>
+          <dt class="label">本輪耗時</dt><dd>4m 12s</dd>
+          <dt class="label">本輪花費</dt><dd>$0.61</dd>
+          <dt class="label">本輪 token</dt><dd>輸入 412k <span style="color:var(--idle)">·</span> 輸出 18.4k</dd>
+          <dt class="label">連線埠</dt><dd>4312</dd>
+        </dl>
+
+        <div class="stream">
+          <div class="st-head">
+            <span class="pulse" aria-hidden="true"></span>
+            <span class="label">coder 即時輸出</span>
+          </div>
+
+          <div class="line say"><span class="t">14:21:31</span><span class="k">說</span><span class="m">先讀 CONTEXT.md 確認 slot 與 occupancy 在這個專案的定義。</span></div>
+          <div class="line tool"><span class="t">14:21:33</span><span class="k">讀取</span><span class="m">CONTEXT.md</span></div>
+          <div class="line tool"><span class="t">14:21:36</span><span class="k">讀取</span><span class="m">docs/adr/0004-timeline-data-ownership.md</span></div>
+          <div class="line say"><span class="t">14:21:44</span><span class="k">說</span><span class="m">ADR 說時間軸資料的擁有者是 hook 不是元件，上一輪把 openModal 放進 hook 違反了這條。</span></div>
+          <div class="line tool"><span class="t">14:21:47</span><span class="k">讀取</span><span class="m">specs/mobile-slot-settings/spec.md</span></div>
+          <div class="line say"><span class="t">14:21:55</span><span class="k">說</span><span class="m">Testing Decisions 指定的 seam 是 useSlotData 的公開介面，不測內部狀態。</span></div>
+          <div class="line say"><span class="t">14:21:58</span><span class="k">說</span><span class="m">先看上一輪 reviewer 指出的那個 hook。</span></div>
+          <div class="line tool"><span class="t">14:22:01</span><span class="k">讀取</span><span class="m">src/hooks/useSlotData.ts</span></div>
+          <div class="line tool"><span class="t">14:22:04</span><span class="k">搜尋</span><span class="m">useSlotData<span class="k"> · 7 處</span></span></div>
+          <div class="line say"><span class="t">14:22:11</span><span class="k">說</span><span class="m">確實有 render 狀態混在裡面，openModal 應該留在元件層。</span></div>
+          <div class="line diff"><span class="t">14:22:19</span><span class="k">編輯</span><span class="m">src/hooks/useSlotData.ts <span class="plus">+48</span> <span class="minus">−31</span></span></div>
+          <div class="line diff"><span class="t">14:22:34</span><span class="k">編輯</span><span class="m">src/components/SharedTimeline.tsx <span class="plus">+22</span> <span class="minus">−9</span></span></div>
+          <div class="line tool"><span class="t">14:23:02</span><span class="k">指令</span><span class="m">pnpm typecheck</span></div>
+          <div class="line say"><span class="t">14:23:47</span><span class="k">說</span><span class="m">typecheck 過了，補 useSlotData 的單元測試。</span></div>
+          <div class="line diff"><span class="t">14:24:10</span><span class="k">編輯</span><span class="m">src/hooks/useSlotData.test.ts <span class="plus">+63</span></span></div>
+          <div class="line tool"><span class="t">14:24:38</span><span class="k">指令</span><span class="m">pnpm test src/hooks/useSlotData.test.ts</span></div>
+          <div class="line say"><span class="t">14:25:02</span><span class="k">說</span><span class="m">兩個測試紅的，回傳形狀還帶著 isModalOpen，把它移回元件。</span></div>
+          <div class="line diff"><span class="t">14:25:11</span><span class="k">編輯</span><span class="m">src/hooks/useSlotData.ts <span class="plus">+4</span> <span class="minus">−12</span></span></div>
+          <div class="line diff"><span class="t">14:25:20</span><span class="k">編輯</span><span class="m">src/components/SlotSettingsPanel.tsx <span class="plus">+17</span> <span class="minus">−2</span></span></div>
+          <div class="line tool"><span class="t">14:25:31</span><span class="k">指令</span><span class="m">pnpm test src/hooks/useSlotData.test.ts</span></div>
+          <div class="line say"><span class="t">14:25:49</span><span class="k">說</span><span class="m">綠了。再跑一次 typecheck 確認元件那邊沒有殘留的型別。</span></div>
+          <div class="line tool"><span class="t">14:25:52</span><span class="k">指令</span><span class="m">pnpm typecheck</span></div>
+          <div class="line say"><span class="t">14:26:04</span><span class="k">說</span><span class="m">過了。跑一次 hooks 目錄的完整測試再交棒。</span></div>
+          <div class="line tool now"><span class="t">14:26:10</span><span class="k">指令</span><span class="m">pnpm test src/hooks</span></div>
+        </div>
+        </div>
+
+      </aside>
+    </div>
+
+    <!-- ======================= 討論 ======================= -->
+    <div class="pane main chat" id="pane-chat" role="tabpanel" aria-label="討論">
+
+      <div style="display:grid; grid-template-rows: minmax(0,1fr) auto; min-height:0; overflow:hidden;">
+        <div class="thread">
+          <article class="turn me">
+            <div class="who">我</div>
+            <p>週檢視的時段列表在 iPad 直向會擠成兩行，而且捲動時標頭會蓋住第一列。想一起處理掉。</p>
+          </article>
+
+          <article class="turn">
+            <div class="who">loom</div>
+            <p>看了 <code>WeekStrip.tsx</code> 和 <code>DayTimeline.tsx</code>，這是兩個獨立的問題：擠成兩行是 grid 的最小欄寬寫死了 <code>96px</code>；標頭遮擋是 sticky 的 <code>top</code> 沒有算進安全區域。</p>
+            <p>還有一個你沒提但會連帶踩到的：現在 <code>DayTimeline</code> 直接讀 <code>useWeekData</code>，改斷點會讓它一起重繪。要不要順手把資料抽出來？</p>
+          </article>
+
+          <article class="turn me">
+            <div class="who">我</div>
+            <p>要，但抽出來要獨立一個 issue，不要跟版面改動混在一起。</p>
+          </article>
+
+          <article class="turn">
+            <div class="who">loom</div>
+            <p>那拆成三個，順序有依賴，02 要等 01 的 hook 才有東西可以用：</p>
+            <ol>
+              <li>抽出 <code>useTimelineRange</code>，行為不變</li>
+              <li>改用彈性欄寬，移除寫死的 <code>96px</code></li>
+              <li>修 sticky 標頭的安全區域偏移</li>
+            </ol>
+            <p>03 我標了要跑 e2e，因為 sticky 的問題只有真的捲動才看得出來，單元測試抓不到。</p>
+          </article>
+        </div>
+
+        <div class="composer">
+          <div class="box">還想調整什麼就直接說，或按右邊開始執行</div>
+        </div>
+      </div>
+
+      <aside class="draft">
+        <div class="dh">
+          <span class="label">即將建立</span>
+          <h3>week-strip-ipad-portrait</h3>
+        </div>
+
+        <ol class="ilist">
+          <li><span class="seq">01</span><span class="nm">extract-timeline-range-hook</span></li>
+          <li><span class="seq">02</span><span class="nm">fluid-week-strip-columns</span></li>
+          <li><span class="seq">03</span><span class="nm">sticky-header-safe-area</span><span class="e2e">E2E</span></li>
+          <li><span class="seq">04</span><span class="nm">confirm-ipad-breakpoints-with-clinic</span><span class="e2e human">等人</span></li>
+        </ol>
+
+        <div class="go">
+          <p class="note">寫進 <span class="mono">specs/week-strip-ipad-portrait/</span> 並立刻開始跑 01。已經開始的 issue 之後就不能再改。</p>
+          <button class="btn primary" type="button">建立並開始執行</button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ======================= 設定 ======================= -->
+    <div class="pane main settings" id="pane-settings" role="tabpanel" aria-label="設定">
+
+      <nav class="wsrail" aria-label="專案">
+        <div class="hd"><span class="label">專案</span></div>
+        <ul>
+          <li>
+            <button class="item" type="button" aria-current="true">
+              <span class="dot" aria-hidden="true"></span>clinic-web
+              <span class="path">~/workspaces/clinic-web</span>
+            </button>
+          </li>
+          <li>
+            <button class="item" type="button">
+              booking-widget
+              <span class="path">~/workspaces/booking-widget</span>
+            </button>
+          </li>
+          <li>
+            <button class="item" type="button">
+              clinic-admin
+              <span class="path">~/workspaces/clinic-admin</span>
+            </button>
+          </li>
+        </ul>
+        <div class="add">
+          <button class="btn" type="button">新增專案</button>
+        </div>
+      </nav>
+
+      <div class="sheet">
+        <h2>clinic-web</h2>
+        <p class="lede">要跑的指令寫在專案自己的 <span class="mono">package.json</span> 裡，loom 只認 <span class="mono">loom:</span> 開頭的 script。改了那邊這裡自動跟上。</p>
+
+        <div class="field"><span class="label">專案路徑</span><span class="in">~/workspaces/clinic-web</span></div>
+        <div class="field"><span class="label">spec 資料夾</span><span class="in">specs/</span></div>
+        <div class="field"><span class="label">主分支</span><span class="in">main</span></div>
+
+        <div class="grp">
+          <div class="grphd"><span class="label">檢查項</span></div>
+          <div class="field"><span class="label">CLAUDE.md</span><span class="in ro" style="color:var(--ok)">找到，agent 會自動載入</span></div>
+          <div class="field"><span class="label">CONTEXT.md</span><span class="in ro" style="color:var(--warn)">找不到，建議先跑 /domain-modeling</span></div>
+        </div>
+
+        <div class="grp">
+          <div class="grphd">
+            <span class="label">讀到的指令</span>
+            <span style="font-size:11.5px; color:var(--muted); margin-left:auto;">package.json</span>
+          </div>
+          <div class="field"><span class="label">loom:setup</span><span class="in ro">pnpm install --frozen-lockfile</span></div>
+          <div class="field"><span class="label">loom:dev</span><span class="in ro">vite --port $PORT</span></div>
+          <div class="field"><span class="label">loom:test</span><span class="in ro">vitest run</span></div>
+          <div class="field"><span class="label">loom:e2e</span><span class="in ro">playwright test</span></div>
+        </div>
+
+        <div class="grp">
+          <div class="grphd"><span class="label">限制</span></div>
+          <div class="field"><span class="label">同時執行的 spec</span><span class="in">2</span></div>
+          <div class="field"><span class="label">連線埠範圍</span><span class="in">4300 – 4399</span></div>
+        </div>
+
+        <div class="grp">
+          <div class="grphd">
+            <span class="label">提示詞</span>
+            <span style="font-size:11.5px; color:var(--muted); margin-left:auto;">預設內容取自 mattpocock/skills，MIT</span>
+          </div>
+
+          <div class="proles">
+            <button class="prole" type="button" aria-current="true">coder</button>
+            <button class="prole" type="button">issue reviewer</button>
+            <button class="prole" type="button">spec reviewer</button>
+            <button class="prole" type="button">chat</button>
+          </div>
+
+          <pre class="ptext"><b># Test-Driven Development</b>
+
+TDD is the red → green loop. Tests verify behavior through
+public interfaces, not implementation details.
+
+A <b>seam</b> is the public boundary you test at. Tests live at
+seams, never against internals. The seams for this work are
+already agreed in the spec's Testing Decisions below — work
+at those, do not introduce new ones.
+
+Work in <b>vertical slices</b>: one test → one implementation →
+repeat, each test a <b>tracer bullet</b>.
+
+... 省略 40 行 ...
+
+交棒前自己跑一次 typecheck 與 unit test。
+不要修改 specs 資料夾裡的任何檔案。
+
+&lt;spec&gt;{spec_md}&lt;/spec&gt;
+&lt;issue&gt;{issue_md}&lt;/issue&gt;
+&lt;上一輪失敗&gt;{last_failure}&lt;/上一輪失敗&gt;</pre>
+
+          <p class="pvars">可用變數 {spec_md} {issue_md} {last_failure} {base_sha} {attempt} {port}</p>
+
+          <div class="pfoot">
+            <span class="lock">輸出 schema 唯讀 · {done, summary, files_changed[]}</span>
+            <button class="btn" type="button">還原預設</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll(".tab");
+  const panes = document.querySelectorAll(".pane");
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
+      panes.forEach(function (p) { p.classList.toggle("on", p.id === "pane-" + tab.dataset.pane); });
+    });
+  });
+
+  // 右側面板在「選中的 issue」與「選中的 spec」兩種內容之間切換
+  const dIssue = document.getElementById("d-issue");
+  const dSpec = document.getElementById("d-spec");
+  const lanes = document.querySelectorAll(".lane");
+  const cards = document.querySelectorAll(".card");
+
+  const STATE_LABEL = {
+    mergeable: "可以合併",
+    blocked: "卡住了",
+    human: "等人動手",
+    running: "執行中",
+    queued: "排隊中",
+  };
+
+  const MERGEABLE_BODY = document.getElementById("sp-body").innerHTML;
+
+  function set(id, text) { document.getElementById(id).textContent = text; }
+
+  function showSpec(lane) {
+    const state = lane.dataset.state;
+    const mergeable = state === "mergeable";
+
+    set("sp-state", STATE_LABEL[state] || state);
+    set("sp-name", lane.dataset.spec);
+    set("sp-branch", lane.dataset.branch);
+    set("sp-prog", lane.dataset.progress);
+    set("sp-elapsed", lane.dataset.elapsed);
+    set("sp-cost", lane.dataset.cost);
+    set("sp-tok", lane.dataset.tok);
+    set("sp-behind", lane.dataset.behind);
+    set("sp-e2e", mergeable ? "綠燈 · 3m 41s" : "等全部 issue 到達終端後才跑");
+
+    const body = document.getElementById("sp-body");
+    const foot = document.getElementById("sp-foot");
+    if (mergeable) {
+      body.innerHTML = MERGEABLE_BODY;
+    } else {
+      body.innerHTML =
+        '<p class="note-run">' + lane.dataset.extra + "</p>" +
+        '<p class="note-run">spec review 與整體 e2e 要等全部 issue 到達終端後才跑。</p>';
+    }
+    foot.hidden = !mergeable;
+
+    lanes.forEach(function (l) { l.classList.toggle("on", l === lane); });
+    cards.forEach(function (c) { c.classList.remove("on"); });
+    dIssue.hidden = true;
+    dSpec.hidden = false;
+  }
+
+  function showIssue(card) {
+    cards.forEach(function (c) { c.classList.toggle("on", c === card); });
+    lanes.forEach(function (l) { l.classList.remove("on"); });
+    dSpec.hidden = true;
+    dIssue.hidden = false;
+  }
+
+  lanes.forEach(function (lane) {
+    lane.addEventListener("click", function () { showSpec(lane); });
+  });
+
+  cards.forEach(function (card) {
+    card.addEventListener("click", function () { showIssue(card); });
+    card.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        showIssue(card);
+      }
+    });
+  });
+</script>
