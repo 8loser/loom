@@ -17,6 +17,8 @@ import {
   checkConsistency,
   mergeSpecIntoMain,
   removeWorktreeAndBranch,
+  commitsBehind,
+  diffShortStat,
 } from "./git.ts";
 
 const scratchRoot = join(process.env.CLAUDE_JOB_DIR ?? ".", "tmp", "git-test");
@@ -290,4 +292,33 @@ test("removeWorktreeAndBranch cleans up after merge", () => {
     encoding: "utf8",
   }).trim();
   assert.equal(branches, "");
+});
+
+test("commitsBehind: null for a branch that doesn't exist yet, counts main-only commits otherwise", () => {
+  const repo = initRepo();
+  assert.equal(commitsBehind(repo, "spec/never-started", "main"), null);
+
+  const wt = join(scratchRoot, "wt-" + Math.random().toString(36).slice(2));
+  ensureWorktree(repo, wt, "spec/behind", "main");
+  assert.equal(commitsBehind(repo, "spec/behind", "main"), 0);
+
+  writeFileSync(join(repo, "on-main.txt"), "x\n");
+  sh(repo, "git", ["add", "-A"]);
+  sh(repo, "git", ["commit", "-q", "-m", "lands on main while spec is running"]);
+  assert.equal(commitsBehind(repo, "spec/behind", "main"), 1);
+});
+
+test("diffShortStat: null when the worktree doesn't exist, insertions/deletions once it does", () => {
+  const repo = initRepo();
+  const wt = join(scratchRoot, "wt-" + Math.random().toString(36).slice(2));
+  assert.equal(diffShortStat(wt, "HEAD"), null);
+
+  ensureWorktree(repo, wt, "spec/diffstat", "main");
+  const baseSha = currentHead(wt);
+  assert.deepEqual(diffShortStat(wt, baseSha), { insertions: 0, deletions: 0 });
+
+  writeFileSync(join(wt, "README.md"), "hello\nmore\n");
+  writeFileSync(join(wt, "new.ts"), "export const x = 1;\n");
+  commitAll(wt, "add a line and a file");
+  assert.deepEqual(diffShortStat(wt, baseSha), { insertions: 2, deletions: 0 });
 });

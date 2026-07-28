@@ -4,8 +4,17 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { openDb, insertWorkspace, getIssueState, getVerifiedMainSha, type Db, type Workspace } from "./db.ts";
-import { writeIssueFrontMatter, writeSpecFrontMatter, readIssueFrontMatter } from "./frontmatter.ts";
+import {
+  openDb,
+  insertWorkspace,
+  getIssueState,
+  getVerifiedMainSha,
+  setIssueBaseSha,
+  startRun,
+  type Db,
+  type Workspace,
+} from "./db.ts";
+import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
 import {
   runUntilIdle,
   stepSpec,
@@ -15,6 +24,8 @@ import {
   loadIssues,
   redoIssue,
   acknowledgeStale,
+  getSpecBoardDetail,
+  getWorkspaceSummary,
   type Ctx,
   type AgentRunner,
   type AgentRequest,
@@ -370,8 +381,8 @@ test("verifySpec: e2e failure creates a followup issue flagged e2e:true", async 
   const issues = loadIssues(ctx, "demo");
   const followup = issues.find((i) => i.id !== "01")!;
   assert.ok(followup, "a followup issue must have been created");
-  const raw = readFileSync(followup.path, "utf8");
-  assert.equal(readIssueFrontMatter(raw)?.e2e, true, "followup issue must force e2e verification");
+  assert.equal(followup.e2e, true, "followup issue must force e2e verification");
+  assert.equal(followup.title, "e2e-followup-1");
 });
 
 test("verifySpec: e2e pass returns spec review comments without creating any issue", async () => {
@@ -508,4 +519,86 @@ test("staleness: only done issues can be stale, and redo/acknowledge both clear 
     loadIssues(ctx, "demo").map((i) => [i.status, i.stale]),
     [["done", false], ["done", false]],
   );
+});
+
+test("getSpecBoardDetail: mergeable spec reports real cost/token totals, elapsed, 0 behind main, and review comments", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { agent } = makeStubAgent();
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }), worktreesRoot };
+
+  await runUntilIdle(ctx, "demo");
+  await verifySpec(ctx, "demo");
+
+  const detail = getSpecBoardDetail(ctx, "demo");
+  assert.equal(detail.branch, "spec/demo");
+  assert.equal(detail.status, "mergeable");
+  assert.ok(detail.costUsd > 0, "coder + reviewer + spec_reviewer runs must all have recorded cost");
+  assert.ok(detail.inputTokens > 0);
+  assert.ok(detail.elapsedMs !== null && detail.elapsedMs >= 0);
+  assert.equal(detail.behindMain, 0, "spec branch was just rebased onto the tip it's being compared against");
+  assert.deepEqual(detail.specReviewComments, ["consider deduping X"]);
+  assert.equal(detail.currentIssue, null, "nothing is mid-state once the spec is mergeable");
+});
+
+test("getSpecBoardDetail: currentIssue reports the in-flight run's role and attempt for a mid-state issue", () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+
+  // 手動把 issue 推到 implementing、開一筆未結束的 run -- 只驗證讀模型，
+  // 不需要真的跑一次 coder 或等它完成。
+  const issuePath = join(ctx.workspace.repoPath, "specs", "demo", "issues", "01-issue.md");
+  writeFileSync(
+    issuePath,
+    writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "implementing", e2e: false, blockedBy: [] }),
+  );
+  setIssueBaseSha(db, workspace.id, "demo", "01", "deadbeef");
+  startRun(db, { workspaceId: workspace.id, spec: "demo", issue: "01", role: "coder", attempt: 1, baseSha: "deadbeef" });
+
+  const detail = getSpecBoardDetail(ctx, "demo");
+  assert.equal(detail.currentIssue?.id, "01");
+  assert.equal(detail.currentIssue?.role, "coder");
+  assert.equal(detail.currentIssue?.attempt, 1);
+  assert.equal(detail.currentIssue?.diffStat, null, "coder role doesn't get a diff stat, only issue_reviewer does");
+  assert.equal(detail.behindMain, null, "spec branch was never created, there's nothing to compare");
+});
+
+test("getSpecBoardDetail: issueFailures surfaces the last review rejection reason per issue", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "pass"] } });
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+
+  await runUntilIdle(ctx, "demo");
+
+  const detail = getSpecBoardDetail(ctx, "demo");
+  assert.equal(detail.issueFailures["01"], "fix the thing");
+});
+
+test("getSpecBoardDetail: issueRetries tracks the exhausted attempt count on a blocked issue, exposes the shared max", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "reject", "reject"] } });
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+
+  await runUntilIdle(ctx, "demo");
+
+  const detail = getSpecBoardDetail(ctx, "demo");
+  assert.equal(detail.issues[0].status, "blocked");
+  assert.deepEqual(detail.issueRetries["01"], { domain: 3, infra: 0 });
+  assert.equal(detail.domainMaxAttempts, 3);
+  assert.equal(detail.infraMaxAttempts, 3);
+});
+
+test("getWorkspaceSummary: recentCostUsd sums today's runs, runningCount reflects specs with a mid-state issue", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { agent } = makeStubAgent();
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+
+  const idle = getWorkspaceSummary(ctx);
+  assert.equal(idle.recentCostUsd, 0);
+  assert.equal(idle.runningCount, 0);
+
+  await stepSpec(ctx, "demo"); // ready -> implementing, one coder run recorded
+
+  const running = getWorkspaceSummary(ctx);
+  assert.ok(running.recentCostUsd > 0);
+  assert.equal(running.runningCount, 1);
 });

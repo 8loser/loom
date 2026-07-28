@@ -4,167 +4,643 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>loom</title>
 <style>
-  :root { color-scheme: light dark; --line: #8884; --dim: #8888; }
-  body { font: 14px/1.5 ui-monospace, monospace; margin: 0; padding: 1.5rem; max-width: 60rem; }
-  h1 { font-size: 1rem; margin: 0 0 1rem; }
-  h1 .dim { font-weight: normal; }
-  .ws { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 1rem; }
-  .ws > header { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap;
-                 padding: .6rem .8rem; border-bottom: 1px solid var(--line); }
-  .ws > header b { font-size: .95rem; }
-  .spec { padding: .5rem .8rem; border-top: 1px solid var(--line); }
-  .spec:first-of-type { border-top: 0; }
-  .spec > header { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-  .issues { list-style: none; margin: .4rem 0 0; padding: 0 0 0 1.2rem; }
-  .issues li { display: flex; gap: .6rem; align-items: center; padding: .15rem 0; }
-  .dim { color: var(--dim); }
-  .tag { border: 1px solid var(--line); border-radius: 999px; padding: 0 .5rem; font-size: .8rem; }
-  .tag.running, .tag.verifying { border-color: #2a7; color: #2a7; }
-  .tag.blocked, .tag.spec_blocked, .tag.import_needed { border-color: #d54; color: #d54; }
-  .tag.human { border-color: #e91; color: #e91; }
-  .tag.mergeable { border-color: #48f; color: #48f; }
-  .stale { color: #e91; }
-  button { font: inherit; padding: 0 .5rem; border: 1px solid var(--line);
-           border-radius: 4px; background: none; color: inherit; cursor: pointer; }
-  button:hover { border-color: currentColor; }
-  #msg { position: sticky; top: 0; padding: .4rem 0; min-height: 1.5rem; }
-  .err { color: #d54; }
+  :root {
+    --bg: #f4f7f6; --surface: #ffffff; --surface-2: #e9efee;
+    --border: #d7e0de; --border-strong: #bfcdca; --text: #141d1c; --muted: #5d6d6b;
+    --accent: #0f7466; --accent-soft: #d7ebe7;
+    --ok: #3d7a36; --ok-soft: #e0eedd;
+    --warn: #94670f; --warn-soft: #f5e9cf;
+    --crit: #a63d2c; --crit-soft: #f6e0db;
+    --idle: #8a9997;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1211; --surface: #141b1a; --surface-2: #1a2322;
+      --border: #253130; --border-strong: #354443; --text: #dbe5e3; --muted: #7f918f;
+      --accent: #4ec2ae; --accent-soft: #123330;
+      --ok: #62b055; --ok-soft: #16290f;
+      --warn: #d09b3a; --warn-soft: #302408;
+      --crit: #d76a55; --crit-soft: #331612;
+      --idle: #4e5f5d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1211; --surface: #141b1a; --surface-2: #1a2322;
+    --border: #253130; --border-strong: #354443; --text: #dbe5e3; --muted: #7f918f;
+    --accent: #4ec2ae; --accent-soft: #123330;
+    --ok: #62b055; --ok-soft: #16290f;
+    --warn: #d09b3a; --warn-soft: #302408;
+    --crit: #d76a55; --crit-soft: #331612;
+    --idle: #4e5f5d;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f7f6; --surface: #ffffff; --surface-2: #e9efee;
+    --border: #d7e0de; --border-strong: #bfcdca; --text: #141d1c; --muted: #5d6d6b;
+    --accent: #0f7466; --accent-soft: #d7ebe7;
+    --ok: #3d7a36; --ok-soft: #e0eedd;
+    --warn: #94670f; --warn-soft: #f5e9cf;
+    --crit: #a63d2c; --crit-soft: #f6e0db;
+    --idle: #8a9997;
+  }
+
+  * { box-sizing: border-box; }
+  :root { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans TC", sans-serif;
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .label {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--muted);
+  }
+
+  .app { display: grid; grid-template-rows: auto auto 1fr; height: 100dvh; overflow: hidden; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 20px; padding: 5px 16px; min-height: 46px;
+    flex-wrap: wrap; background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 15px; font-weight: 600; letter-spacing: 0.16em; color: var(--accent);
+  }
+  #ws-select {
+    display: flex; align-items: center; gap: 7px; padding: 4px 9px;
+    border: 1px solid var(--border-strong); border-radius: 3px; background: var(--surface-2);
+    color: var(--text); cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .meters { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .meter { display: flex; align-items: baseline; gap: 6px; }
+  .meter .v {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums; font-size: 13px;
+  }
+
+  /* ---------- attention strip ---------- */
+  .attention { display: flex; flex-direction: column; border-bottom: 1px solid var(--border); }
+  .attention:empty { display: none; }
+  .banner { display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-left: 3px solid transparent; flex-wrap: wrap; }
+  .banner + .banner { border-top: 1px solid var(--border); }
+  .banner.ready-to-merge { background: var(--ok-soft); border-left-color: var(--ok); }
+  .banner.stuck { background: var(--crit-soft); border-left-color: var(--crit); }
+  .banner .tag {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; font-weight: 600;
+  }
+  .banner.ready-to-merge .tag { color: var(--ok); }
+  .banner.stuck .tag { color: var(--crit); }
+  .banner .what { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+  .banner .why { color: var(--muted); font-size: 12.5px; }
+  .banner .acts { margin-left: auto; display: flex; gap: 6px; }
+
+  .btn {
+    appearance: none; font: inherit; font-size: 12px; padding: 4px 12px; border-radius: 3px;
+    border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.08); color: var(--surface); }
+
+  /* ---------- main split ---------- */
+  .main { display: grid; grid-template-columns: minmax(0, 1fr) 372px; min-height: 0; }
+
+  /* ---------- board ---------- */
+  .board { overflow: auto; min-width: 0; }
+  .grid { display: grid; grid-template-columns: repeat(5, minmax(178px, 1fr)); min-width: 900px; }
+  .colhead {
+    position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 9px 12px 7px;
+    border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 7px;
+  }
+  .lane {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; width: 100%;
+    text-align: left; appearance: none; border: 0; border-bottom: 1px solid var(--border);
+    padding: 11px 12px 9px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer;
+  }
+  .lane:hover { background: var(--accent-soft); }
+  .lane.on { box-shadow: inset 2px 0 0 var(--accent); }
+  .lane.err { background: var(--crit-soft); cursor: default; }
+  .lane .name { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 600; }
+  .lane .branch { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); }
+  .lane .spacer { margin-left: auto; }
+  .prog { display: flex; align-items: center; gap: 7px; }
+  .bar { width: 84px; height: 3px; background: var(--border-strong); border-radius: 2px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .prog .c { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .cell {
+    padding: 8px; display: flex; flex-direction: column; gap: 7px;
+    border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); min-height: 62px;
+  }
+  .cell:nth-child(6n + 5) { border-right: none; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-left: 2px solid var(--idle);
+    border-radius: 3px; padding: 7px 9px; display: flex; flex-direction: column; gap: 4px;
+    cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%;
+  }
+  .card:hover { border-color: var(--border-strong); border-left-color: var(--accent); }
+  .card.live { border-left-color: var(--accent); }
+  .card.retry { border-left-color: var(--warn); }
+  .card.halted { border-left-color: var(--crit); }
+  .card.manual { border-left-color: var(--warn); border-left-style: dashed; }
+  .card.shipped { border-left-color: var(--ok); opacity: 0.72; }
+  .card.dropped { border-left-color: var(--idle); opacity: 0.55; }
+  .card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card .id { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.35; word-break: break-word; }
+  .card .id b { color: var(--accent); font-weight: 600; }
+  .card .foot {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .card .foot .hot { color: var(--warn); }
+  .card .foot .bad { color: var(--crit); }
+  .card .foot .good { color: var(--ok); }
+  .card .cardacts { margin-top: 2px; }
+  .card .cardacts .btn { font-size: 11px; padding: 2px 8px; }
+
+  .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: beat 1.6s ease-in-out infinite; flex: none; }
+  @keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+  .queued { color: var(--idle); font-size: 11.5px; padding: 3px 2px; }
+
+  .fold {
+    grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; width: 100%;
+    text-align: left; appearance: none; border: 0; border-bottom: 1px solid var(--border);
+    background: none; cursor: pointer; padding: 10px 12px; color: var(--muted); font: inherit;
+  }
+  .fold:hover { background: var(--surface-2); color: var(--text); }
+  .fold .tw { font-size: 8px; flex: none; }
+  .fold .ttl {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; flex: none;
+  }
+  .fold .names {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--idle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
+
+  .e2e {
+    font-size: 9.5px; letter-spacing: 0.09em; padding: 1px 5px; border-radius: 2px;
+    background: var(--warn-soft); color: var(--warn); flex: none;
+  }
+
+  /* ---------- detail ---------- */
+  .detail { border-left: 1px solid var(--border); background: var(--surface); min-height: 0; overflow: auto; }
+  .dpanel { display: grid; grid-template-rows: auto auto 1fr; height: 100%; min-height: 0; }
+  .dpanel[hidden] { display: none; }
+  .cmts { overflow: auto; padding: 11px 0 14px; min-height: 0; }
+  .cmts .ch { padding: 0 14px 8px; }
+  .cmt { padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  .cmt p { margin: 0; font-size: 12.5px; }
+  .dfoot { display: flex; gap: 7px; padding: 11px 14px; border-top: 1px solid var(--border); }
+  .dfoot[hidden] { display: none; }
+  .dfoot .btn { flex: 1; }
+  .note-run { padding: 14px; color: var(--muted); font-size: 12.5px; }
+  .dhead { padding: 13px 14px 11px; border-bottom: 1px solid var(--border); }
+  .dhead h2 {
+    margin: 3px 0 0; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13.5px; font-weight: 600; line-height: 1.4;
+  }
+  .dhead .sub { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .facts {
+    display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; padding: 11px 14px;
+    border-bottom: 1px solid var(--border); align-items: baseline;
+  }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .facts dd.warnish { color: var(--warn); }
+  .facts dd.critish { color: var(--crit); }
+
+  .addws { display: flex; gap: 6px; align-items: center; }
+  .addws input {
+    font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 3px;
+    border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); width: 15ch;
+  }
+  #err { color: var(--crit); font-size: 12.5px; padding: 6px 16px; min-height: 1.4em; }
 </style>
 
-<h1>loom <span class="dim" id="conn">連線中</span></h1>
-<div id="msg"></div>
-<div id="board" class="dim">載入中</div>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <section class="attention" id="attention"></section>
+  <div class="main">
+    <div class="board"><div class="grid" id="grid"></div></div>
+    <aside class="detail" id="detail"></aside>
+  </div>
+</div>
+<div id="err"></div>
 
 <script>
-// 顯示用標籤。鍵對應 statemachine.ts 的 SpecDisplayStatus 與 frontmatter.ts 的
-// IssueStatus，外加 server.ts 在 spec 讀不到 front matter 時回的 import_needed。
-const SPEC_LABEL = {
-  merged: "已合併", spec_blocked: "spec 卡住", blocked: "卡住", human: "等人處理",
-  running: "執行中", verifying: "驗證中", mergeable: "可合併", queued: "排隊中",
-  draft: "草稿", import_needed: "需匯入",
-};
 const ISSUE_LABEL = {
   draft: "草稿", ready: "待開工", implementing: "實作中", review_ready: "待審查",
   reviewing: "審查中", test_ready: "待測試", testing: "測試中", done: "完成",
   blocked: "卡住", human: "等人處理", dropped: "已捨棄",
 };
-const MERGE_FAIL = {
-  rebase_conflict: "rebase 衝突，spec 已標記為卡住",
-  merge_conflict: "merge 衝突，spec 已標記為卡住",
-  specs_touched: "分支改到了 specs/，spec 已標記為卡住",
-  needs_reverify: "驗證通過後 main 有新的 code，要重新驗證才能合併",
+const SPEC_LABEL = {
+  merged: "已合併", spec_blocked: "spec 卡住", blocked: "卡住", human: "等人處理",
+  running: "執行中", verifying: "驗證中", mergeable: "可以合併", queued: "排隊中",
+  draft: "草稿", import_needed: "需匯入",
 };
+const ROLE_LABEL = { coder: "coder", issue_reviewer: "reviewer", test: "test" };
+// blocked/human 沒有記憶「卡住前最後停在哪個 agent 階段」（front matter 只
+// 存目前狀態，不存歷史），所以一律歸類到待處理欄，靠卡片自己的樣式
+// （halted/manual）分辨，不是真的還沒開工。
+const COLUMNS = [
+  { label: "待處理", match: (i) => ["draft", "ready", "blocked", "human"].includes(i.status) },
+  { label: "實作中", match: (i) => i.status === "implementing" },
+  { label: "審查中", match: (i) => ["review_ready", "reviewing"].includes(i.status) },
+  { label: "測試中", match: (i) => ["test_ready", "testing"].includes(i.status) },
+  { label: "完成", match: (i) => ["done", "dropped"].includes(i.status) },
+];
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const tag = (s, labels) => `<span class="tag ${esc(s)}">${esc(labels[s] ?? s)}</span>`;
 
-function say(text, isError) {
-  $("msg").innerHTML = text ? `<span class="${isError ? "err" : "dim"}">${esc(text)}</span>` : "";
+function fmtTokens(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return Math.round(n / 1e3) + "k";
+  return String(n);
+}
+function fmtCost(usd) { return "$" + usd.toFixed(2); }
+function fmtElapsed(ms) {
+  if (ms == null) return "-";
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
 }
 
-async function post(url) {
-  const res = await fetch(url, { method: "POST" });
+let workspaces = [];
+let currentWs = null;
+let board = null; // 目前 workspace 最近一次抓到的 board 回應
+let selection = null; // {type:'spec', spec} | {type:'issue', spec, issue} | null
+let liveTimer = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? res.statusText);
   return body;
 }
 
-function issueRow(ws, spec, issue) {
-  const actions = [];
-  // redo 對 blocked/human 是「退回重做」，對 stale 是「來源改了要重跑」；
-  // acknowledge-stale 只在有徽章時有意義。其餘狀態排程器自己會推，不給按鈕。
-  if (issue.stale || issue.status === "blocked" || issue.status === "human") {
-    actions.push(`<button data-act="redo" data-ws="${esc(ws)}" data-spec="${esc(spec)}" data-issue="${esc(issue.id)}">重做</button>`);
+function say(text) { $("err").textContent = text ?? ""; }
+
+async function refresh() {
+  try {
+    workspaces = await api("/api/workspaces");
+    if (!workspaces.some((w) => w.name === currentWs)) currentWs = workspaces[0]?.name ?? null;
+    board = currentWs ? await api(`/api/workspaces/${encodeURIComponent(currentWs)}/board`) : null;
+    say("");
+  } catch (err) {
+    say(`讀看板失敗：${err.message}`);
+    return;
   }
-  if (issue.stale) {
-    actions.push(`<button data-act="acknowledge-stale" data-ws="${esc(ws)}" data-spec="${esc(spec)}" data-issue="${esc(issue.id)}">忽略變更</button>`);
-  }
-  const blockedBy = issue.blockedBy?.length ? `<span class="dim">依賴 ${esc(issue.blockedBy.join(", "))}</span>` : "";
-  const stale = issue.stale ? '<span class="stale">來源已變更</span>' : "";
-  return `<li><span>${esc(issue.id)}</span>${tag(issue.status, ISSUE_LABEL)}${blockedBy}${stale}${actions.join("")}</li>`;
+  render();
 }
 
-function specBlock(ws, spec) {
-  if (spec.status === "import_needed") {
-    return `<div class="spec"><header><b>${esc(spec.spec)}</b>${tag(spec.status, SPEC_LABEL)}
-      <span class="dim">${esc(spec.error ?? "")}</span></header></div>`;
+function findSpec(spec) { return board?.specs.find((s) => s.spec === spec) ?? null; }
+function findIssue(spec, issue) { return findSpec(spec)?.issues.find((i) => i.id === issue) ?? null; }
+
+function render() {
+  renderTopbar();
+  renderAttention();
+  renderGrid();
+  renderDetail();
+  restartLiveTick();
+}
+
+function renderTopbar() {
+  const topbar = $("topbar");
+  if (!currentWs) {
+    topbar.innerHTML = `<span class="brand">LOOM</span>
+      <span class="addws">
+        <input id="new-ws-name" placeholder="workspace 名稱">
+        <input id="new-ws-path" placeholder="/絕對路徑/到/repo" style="width:22ch">
+        <button class="btn primary" id="add-ws">新增</button>
+      </span>`;
+    $("add-ws").addEventListener("click", addWorkspace);
+    return;
   }
-  const merge = spec.status === "mergeable"
-    ? `<button data-act="merge" data-ws="${esc(ws)}" data-spec="${esc(spec.spec)}">合併</button>` : "";
-  const reason = spec.blockedReason ? `<span class="dim">${esc(spec.blockedReason)}</span>` : "";
-  return `<div class="spec">
-    <header><b>${esc(spec.spec)}</b>${tag(spec.status, SPEC_LABEL)}${reason}${merge}</header>
-    <ul class="issues">${spec.issues.map((i) => issueRow(ws, spec.spec, i)).join("")}</ul>
+  const ws = workspaces.find((w) => w.name === currentWs);
+  const s = board.summary;
+  const opts = workspaces.map((w) => `<option value="${esc(w.name)}" ${w.name === currentWs ? "selected" : ""}>${esc(w.name)}</option>`).join("");
+  topbar.innerHTML = `
+    <span class="brand">LOOM</span>
+    <select id="ws-select">${opts}</select>
+    <div class="meters">
+      <span class="meter"><span class="label">同時執行</span><span class="v">${s.runningCount} / ${ws.parallelLimit}</span></span>
+      <span class="meter"><span class="label">近 24h token</span><span class="v">輸入 ${fmtTokens(s.recentInputTokens)} · 輸出 ${fmtTokens(s.recentOutputTokens)}</span></span>
+      <span class="meter"><span class="label">近 24h 花費</span><span class="v">${fmtCost(s.recentCostUsd)}</span></span>
+      <span class="meter">${board.paused ? "" : '<span class="pulse" aria-hidden="true"></span>'}<span class="v">${board.paused ? "已暫停" : "執行中"}</span></span>
+      <button class="btn" id="toggle-pause">${board.paused ? "繼續" : "暫停"}</button>
+    </div>`;
+  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; refresh(); });
+  $("toggle-pause").addEventListener("click", async () => {
+    await api(`/api/workspaces/${encodeURIComponent(currentWs)}/${board.paused ? "resume" : "pause"}`, { method: "POST" });
+    refresh();
+  });
+  if (board.error) say(`排程器上次執行時出錯：${board.error}`);
+}
+
+function renderAttention() {
+  const el = $("attention");
+  if (!board) { el.innerHTML = ""; return; }
+  const banners = [];
+  for (const spec of board.specs) {
+    if (spec.status === "import_needed") continue;
+    if (spec.status === "mergeable") {
+      banners.push(`<div class="banner ready-to-merge">
+        <span class="tag">可以收了</span>
+        <span class="what">${esc(spec.spec)}</span>
+        <span class="why">${spec.issues.length} 個 issue 全過，落後 main ${spec.behindMain ?? "?"} 個 commit</span>
+        <span class="acts"><button class="btn primary" data-act="merge" data-spec="${esc(spec.spec)}">合併到 main</button></span>
+      </div>`);
+    } else if (spec.status === "blocked" || spec.status === "human") {
+      const stuck = spec.issues.find((i) => i.status === "blocked" || i.status === "human");
+      const why = (stuck && spec.issueFailures[stuck.id]) ?? (spec.status === "human" ? "等人決定怎麼做" : "重試次數已用完");
+      banners.push(`<div class="banner stuck">
+        <span class="tag">${spec.status === "human" ? "等人處理" : "卡住了"}</span>
+        <span class="what">${esc(spec.spec)}${stuck ? ` / ${esc(stuck.id)} ${esc(stuck.title)}` : ""}</span>
+        <span class="why">${esc(why)}</span>
+        ${stuck ? `<span class="acts"><button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(stuck.id)}">退回 ready</button></span>` : ""}
+      </div>`);
+    } else if (spec.status === "spec_blocked") {
+      banners.push(`<div class="banner stuck">
+        <span class="tag">spec 卡住</span>
+        <span class="what">${esc(spec.spec)}</span>
+        <span class="why">${esc(spec.blockedReason ?? "")} -- 需要手動處理 git 狀態，看詳情裡的說明</span>
+      </div>`);
+    }
+  }
+  el.innerHTML = banners.join("");
+}
+
+function issueCard(spec, issue) {
+  const classes = ["card"];
+  const live = spec.currentIssue && spec.currentIssue.id === issue.id ? spec.currentIssue : null;
+  if (live) classes.push("live");
+  if (live && live.attempt > 1) classes.push("retry");
+  if (issue.status === "blocked") classes.push("halted");
+  if (issue.status === "human") classes.push("manual");
+  if (issue.status === "done") classes.push("shipped");
+  if (issue.status === "dropped") classes.push("dropped");
+  if (selection?.type === "issue" && selection.spec === spec.spec && selection.issue === issue.id) classes.push("on");
+
+  const idLine = `<span class="id"><b>${esc(issue.id)}</b> ${esc(issue.title)}</span>`;
+  const e2eTag = issue.e2e ? '<span class="e2e">E2E</span>' : "";
+  let foot = "";
+  let acts = "";
+
+  if (live) {
+    const attempt = live.attempt > 1 ? `<span class="hot">第 ${live.attempt} / ${spec.domainMaxAttempts} 次</span>` : "";
+    const diff = live.diffStat ? `<span><span style="color:var(--ok)">+${live.diffStat.insertions}</span> <span style="color:var(--crit)">-${live.diffStat.deletions}</span></span>` : "";
+    foot = `<span class="foot"><span class="pulse" aria-hidden="true"></span>
+      <span>${esc(ROLE_LABEL[live.role] ?? live.role)}</span>
+      <span class="live-elapsed" data-since="${live.startedAt}">${fmtElapsed(Date.now() - live.startedAt)}</span>
+      ${attempt}${diff}${e2eTag}</span>`;
+  } else if (issue.status === "blocked") {
+    const r = spec.issueRetries[issue.id];
+    const label = r ? `${r.domain} / ${spec.domainMaxAttempts} 次未通過` : "未通過";
+    foot = `<span class="foot"><span class="bad">${esc(label)}</span>${e2eTag}</span>`;
+  } else if (issue.status === "human") {
+    foot = `<span class="foot"><span class="hot">等你動手</span>${e2eTag}</span>
+      <span class="foot cardacts"><button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">退回 ready</button></span>`;
+  } else if (issue.status === "done") {
+    const staleTag = issue.stale ? '<span class="hot">來源已變更</span>' : "";
+    const e2ePass = issue.e2e ? '<span class="good">e2e 通過</span>' : "";
+    foot = staleTag || e2ePass ? `<span class="foot">${staleTag}${e2ePass}</span>` : "";
+    if (issue.stale) acts = `<span class="foot cardacts">
+      <button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">重做</button>
+      <button class="btn" data-act="acknowledge-stale" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">忽略變更</button>
+    </span>`;
+  } else if (issue.status === "dropped") {
+    foot = '<span class="foot">已捨棄</span>';
+  } else if (e2eTag) {
+    foot = `<span class="foot">${e2eTag}</span>`;
+  }
+
+  const title = spec.issueFailures[issue.id] ? ` title="${esc(spec.issueFailures[issue.id])}"` : "";
+  return `<div class="${classes.join(" ")}" tabindex="0" role="button" data-issue="${esc(issue.id)}" data-spec="${esc(spec.spec)}"${title}>
+    ${idLine}${foot}${acts}</div>`;
+}
+
+function laneProgress(spec) {
+  const total = spec.issues.length;
+  const done = spec.issues.filter((i) => i.status === "done" || i.status === "dropped").length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const color = spec.status === "blocked" || spec.status === "spec_blocked" ? "var(--crit)"
+    : spec.status === "mergeable" || spec.status === "merged" ? "var(--ok)" : "var(--accent)";
+  const stuck = spec.issues.find((i) => i.status === "blocked" || i.status === "human");
+  const c2 = spec.status === "mergeable" ? "e2e 綠燈"
+    : stuck ? `停在 ${esc(stuck.id)}`
+    : spec.status === "verifying" ? "驗證中"
+    : spec.elapsedMs != null ? `已跑 ${fmtElapsed(spec.elapsedMs)}`
+    : "尚未開始";
+  return `<span class="prog">
+    <span class="bar"><i style="width:${pct}%; background:${color}"></i></span>
+    <span class="c">${done} / ${total}</span>
+    <span class="c">${c2}</span>
+  </span>`;
+}
+
+function renderGrid() {
+  const grid = $("grid");
+  if (!board) { grid.innerHTML = ""; return; }
+
+  const drafts = board.specs.filter((s) => s.status === "draft");
+  const mergedList = board.specs.filter((s) => s.status === "merged");
+  const importNeeded = board.specs.filter((s) => s.status === "import_needed");
+  const active = board.specs.filter((s) => !["draft", "merged", "import_needed"].includes(s.status));
+
+  const head = COLUMNS.map((c) => `<div class="colhead"><span class="label">${c.label}</span></div>`).join("");
+
+  const lanes = active.map((spec) => {
+    const laneClass = selection?.type === "spec" && selection.spec === spec.spec ? "lane on" : "lane";
+    const lane = `<button class="${laneClass}" type="button" data-spec="${esc(spec.spec)}">
+      <span class="name">${esc(spec.spec)}</span>
+      <span class="branch">${esc(spec.branch)}</span>
+      <span class="spacer"></span>
+      ${laneProgress(spec)}
+    </button>`;
+    const cells = COLUMNS.map((col) => {
+      const cards = spec.issues.filter(col.match).map((i) => issueCard(spec, i)).join("");
+      return `<div class="cell">${cards}</div>`;
+    }).join("");
+    return lane + cells;
+  }).join("");
+
+  const errLanes = importNeeded.map((spec) => `
+    <div class="lane err">
+      <span class="name">${esc(spec.spec)}</span>
+      <span class="branch">需匯入 -- ${esc(spec.error ?? "")}</span>
+    </div>`).join("");
+
+  const foldRow = (label, list) => list.length ? `<button class="fold" type="button">
+      <span class="tw" aria-hidden="true">▸</span>
+      <span class="ttl">${label} ${list.length}</span>
+      <span class="names">${list.map((s) => esc(s.spec)).join(" · ")}</span>
+    </button>` : "";
+
+  grid.innerHTML = head + errLanes + lanes + foldRow("草稿", drafts) + foldRow("已合併", mergedList);
+}
+
+function specFacts(spec) {
+  const behind = spec.behindMain === null ? "-" : `${spec.behindMain} 個 code commit`;
+  return `<dl class="facts">
+    <dt class="label">進度</dt><dd>${spec.issues.filter((i) => i.status === "done").length} / ${spec.issues.length} issue 完成</dd>
+    <dt class="label">落後 main</dt><dd${spec.behindMain > 0 ? ' class="warnish"' : ""}>${behind}</dd>
+    <dt class="label">耗時</dt><dd>${fmtElapsed(spec.elapsedMs)}</dd>
+    <dt class="label">花費</dt><dd>${fmtCost(spec.costUsd)}</dd>
+    <dt class="label">Token</dt><dd>輸入 ${fmtTokens(spec.inputTokens)} · 輸出 ${fmtTokens(spec.outputTokens)}</dd>
+  </dl>`;
+}
+
+function renderSpecDetail(spec) {
+  const comments = spec.specReviewComments;
+  const body = comments === null
+    ? '<p class="note-run">spec review 要等全部 issue 到達終端後才跑。</p>'
+    : comments.length === 0
+      ? '<p class="note-run">沒有意見。</p>'
+      : `<div class="cmts"><div class="ch"><span class="label">整體 review 意見 ${comments.length} 條</span></div>
+         ${comments.map((c) => `<div class="cmt"><p>${esc(c)}</p></div>`).join("")}</div>`;
+  const foot = spec.status === "mergeable"
+    ? `<div class="dfoot"><button class="btn primary" data-act="merge" data-spec="${esc(spec.spec)}">合併到 main</button></div>`
+    : "";
+  const reason = spec.blockedReason ? `<p class="note-run">blocked_reason: ${esc(spec.blockedReason)}</p>` : "";
+  return `<div class="dpanel">
+    <div class="dhead">
+      <span class="label">${esc(SPEC_LABEL[spec.status] ?? spec.status)}</span>
+      <h2>${esc(spec.spec)}</h2>
+      <div class="sub">${esc(spec.branch)}</div>
+    </div>
+    ${specFacts(spec)}
+    ${reason}${body}
+    ${foot}
   </div>`;
 }
 
-function workspaceBlock(w, board) {
-  const toggle = board.paused
-    ? `<button data-act="resume" data-ws="${esc(w.name)}">繼續</button>`
-    : `<button data-act="pause" data-ws="${esc(w.name)}">暫停</button>`;
-  const state = board.paused ? '<span class="tag blocked">已暫停</span>' : '<span class="tag running">排程中</span>';
-  const err = board.error ? `<span class="err">${esc(board.error)}</span>` : "";
-  const specs = board.specs.length
-    ? board.specs.map((s) => specBlock(w.name, s)).join("")
-    : '<div class="spec dim">這個 repo 的 specs/ 底下還沒有 spec</div>';
-  return `<section class="ws">
-    <header><b>${esc(w.name)}</b>${state}<span class="dim">${esc(w.repoPath)}</span>${err}${toggle}</header>
-    ${specs}</section>`;
+function renderIssueDetail(spec, issue) {
+  const live = spec.currentIssue && spec.currentIssue.id === issue.id ? spec.currentIssue : null;
+  const retries = spec.issueRetries[issue.id];
+  const failure = spec.issueFailures[issue.id];
+  const rows = [];
+  if (live) {
+    rows.push(`<dt class="label">現在</dt><dd class="live-elapsed" data-since="${live.startedAt}">${esc(ROLE_LABEL[live.role] ?? live.role)} · ${fmtElapsed(Date.now() - live.startedAt)}</dd>`);
+    if (live.attempt > 1) rows.push(`<dt class="label">嘗試</dt><dd class="warnish">第 ${live.attempt} / ${spec.domainMaxAttempts} 次</dd>`);
+    if (live.diffStat) rows.push(`<dt class="label">目前 diff</dt><dd><span style="color:var(--ok)">+${live.diffStat.insertions}</span> <span style="color:var(--crit)">-${live.diffStat.deletions}</span></dd>`);
+  }
+  if (retries) rows.push(`<dt class="label">重試</dt><dd${issue.status === "blocked" ? ' class="critish"' : ""}>domain ${retries.domain} / ${spec.domainMaxAttempts} · infra ${retries.infra} / ${spec.infraMaxAttempts}</dd>`);
+  if (failure) rows.push(`<dt class="label">退回原因</dt><dd>${esc(failure)}</dd>`);
+  if (issue.blockedBy.length) rows.push(`<dt class="label">依賴</dt><dd>${esc(issue.blockedBy.join(", "))}</dd>`);
+  if (issue.e2e) rows.push(`<dt class="label">e2e</dt><dd>要跑</dd>`);
+  if (issue.stale) rows.push(`<dt class="label">來源</dt><dd class="warnish">spec 或 issue 內容已變更</dd>`);
+
+  const acts = [];
+  if (issue.status === "blocked" || issue.status === "human") {
+    acts.push(`<button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">退回 ready</button>`);
+  }
+  if (issue.stale) {
+    acts.push(`<button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">重做</button>`);
+    acts.push(`<button class="btn" data-act="acknowledge-stale" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">忽略變更</button>`);
+  }
+
+  return `<div class="dpanel">
+    <div class="dhead">
+      <span class="label">${esc(ISSUE_LABEL[issue.status] ?? issue.status)} · ${esc(spec.spec)}</span>
+      <h2>${esc(issue.id)} ${esc(issue.title)}</h2>
+      <div class="sub">${esc(issue.path)}</div>
+    </div>
+    <dl class="facts">${rows.join("") || '<dt class="label">狀態</dt><dd>沒有額外資訊</dd>'}</dl>
+    <div></div>
+    ${acts.length ? `<div class="dfoot">${acts.join("")}</div>` : ""}
+  </div>`;
 }
 
-let rendering = false;
-async function render() {
-  if (rendering) return; // SSE 連續事件不必疊著跑，最後一次的結果一樣是最新的
-  rendering = true;
+function renderDetail() {
+  const el = $("detail");
+  if (!board || !selection) { el.innerHTML = '<p class="note-run">選一個 spec 或 issue 看詳情。</p>'; return; }
+  if (selection.type === "spec") {
+    const spec = findSpec(selection.spec);
+    el.innerHTML = spec ? renderSpecDetail(spec) : '<p class="note-run">這個 spec 不見了。</p>';
+  } else {
+    const spec = findSpec(selection.spec);
+    const issue = spec && findIssue(selection.spec, selection.issue);
+    el.innerHTML = spec && issue ? renderIssueDetail(spec, issue) : '<p class="note-run">這個 issue 不見了。</p>';
+  }
+}
+
+// 只有「目前正在跑的那個 issue」需要即時跳動的耗時數字，其餘資料都是
+// SSE/poll 觸發整頁重抓即可，不必為了一個數字每秒重繪整個看板。
+function restartLiveTick() {
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(() => {
+    document.querySelectorAll(".live-elapsed[data-since]").forEach((el) => {
+      const since = Number(el.dataset.since);
+      const prefix = el.textContent.includes("·") ? el.textContent.split("·")[0] + "· " : "";
+      el.textContent = prefix + fmtElapsed(Date.now() - since);
+    });
+  }, 1000);
+}
+
+async function addWorkspace() {
+  const name = $("new-ws-name").value.trim();
+  const repoPath = $("new-ws-path").value.trim();
+  if (!name || !repoPath) { say("名稱與路徑都要填。"); return; }
   try {
-    const workspaces = await (await fetch("/api/workspaces")).json();
-    if (!workspaces.length) {
-      $("board").className = "dim";
-      $("board").textContent = "還沒有 workspace。用 POST /api/workspaces 註冊一個 repo。";
-      return;
-    }
-    const boards = await Promise.all(
-      workspaces.map((w) => fetch(`/api/workspaces/${encodeURIComponent(w.name)}/board`).then((r) => r.json())),
-    );
-    $("board").className = "";
-    $("board").innerHTML = workspaces.map((w, i) => workspaceBlock(w, boards[i])).join("");
+    await api("/api/workspaces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, repoPath }),
+    });
+    currentWs = name;
+    await refresh();
   } catch (err) {
-    say(`讀看板失敗：${err.message}`, true);
-  } finally {
-    rendering = false;
+    say(`新增 workspace 失敗：${err.message}`);
   }
 }
 
 document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-act]");
-  if (!btn) return;
-  const { act, ws, spec, issue } = btn.dataset;
-  const base = `/api/workspaces/${encodeURIComponent(ws)}`;
-  const url = act === "pause" || act === "resume"
-    ? `${base}/${act}`
-    : act === "merge"
-      ? `${base}/specs/${encodeURIComponent(spec)}/merge`
-      : `${base}/specs/${encodeURIComponent(spec)}/issues/${encodeURIComponent(issue)}/${act}`;
-  btn.disabled = true;
-  say("");
-  try {
-    const result = await post(url);
-    if (act === "merge") {
-      say(result.merged ? `${spec} 已合併` : MERGE_FAIL[result.reason] ?? `合併失敗：${result.reason}`, !result.merged);
+  const actBtn = e.target.closest("button[data-act]");
+  if (actBtn) {
+    e.stopPropagation();
+    const { act, spec, issue } = actBtn.dataset;
+    const base = `/api/workspaces/${encodeURIComponent(currentWs)}/specs/${encodeURIComponent(spec)}`;
+    const url = act === "merge" ? `${base}/merge` : `${base}/issues/${encodeURIComponent(issue)}/${act}`;
+    actBtn.disabled = true;
+    try {
+      const result = await api(url, { method: "POST" });
+      if (act === "merge" && !result.merged) say(`合併失敗：${result.reason}`);
+      else say("");
+    } catch (err) {
+      say(`${act} 失敗：${err.message}`);
     }
-  } catch (err) {
-    say(`${act} 失敗：${err.message}`, true);
-  } finally {
-    await render(); // 動作的結果一律靠重抓 board 呈現，不在前端猜狀態
+    await refresh();
+    return;
   }
+
+  const lane = e.target.closest(".lane[data-spec]");
+  if (lane) { selection = { type: "spec", spec: lane.dataset.spec }; render(); return; }
+
+  const card = e.target.closest(".card[data-issue]");
+  if (card) { selection = { type: "issue", spec: card.dataset.spec, issue: card.dataset.issue }; render(); return; }
 });
 
-// SSE 只送「哪個 workspace 變了」，前端一律重抓整個看板，不做增量更新。
 const events = new EventSource("/api/events");
-events.addEventListener("connected", () => { $("conn").textContent = "已連線"; });
-events.addEventListener("board-changed", render);
-events.onerror = () => { $("conn").textContent = "連線中斷，重試中"; };
+events.addEventListener("board-changed", (e) => {
+  const data = JSON.parse(e.data);
+  if (!currentWs || data.workspace === currentWs) refresh();
+});
+// SSE 只在排程器實際改變東西時觸發；一個 issue 跑很久的期間不會有事件，
+// 靠這個保底 poll 讓 cost/token/耗時之類的數字不會看起來卡住。
+setInterval(refresh, 10000);
 
-render();
+refresh();
 </script>

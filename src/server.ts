@@ -9,7 +9,8 @@ import { openDb, listWorkspaces, insertWorkspace, getWorkspace, type Workspace }
 import { createClaudeAgentRunner, DEFAULT_PROMPTS } from "./agent.ts";
 import {
   listSpecs,
-  getSpecBoard,
+  getSpecBoardDetail,
+  getWorkspaceSummary,
   attemptMerge,
   redoIssue,
   acknowledgeStale,
@@ -120,7 +121,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     if (!handle) return c.json({ error: "no such workspace" }, 404);
     const specs = listSpecs(handle.ctx).map((spec) => {
       try {
-        return getSpecBoard(handle.ctx, spec);
+        return getSpecBoardDetail(handle.ctx, spec);
       } catch (err) {
         // 還沒 import（沒有 front matter）或格式不對，board 上顯示出來但不
         // 是排程器該處理的狀態，交給「匯入既有 specs 資料夾」那條路。
@@ -131,7 +132,12 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
         };
       }
     });
-    return c.json({ paused: handle.scheduler.isPaused(), error: handle.scheduler.getError(), specs });
+    return c.json({
+      paused: handle.scheduler.isPaused(),
+      error: handle.scheduler.getError(),
+      summary: getWorkspaceSummary(handle.ctx),
+      specs,
+    });
   });
 
   app.post("/api/workspaces/:name/pause", (c) => {

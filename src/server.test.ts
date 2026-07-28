@@ -249,7 +249,7 @@ test("GET / serves the board page, and every endpoint that page calls is a real 
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
     const html = await page.text();
-    assert.match(html, /id="board"/, "ui.html must actually be the thing being served");
+    assert.match(html, /id="grid"/, "ui.html must actually be the thing being served");
     assert.match(html, /new EventSource\("\/api\/events"\)/);
 
     // 這份清單是 ui.html 打得出來的每一種 URL 形狀，手動同步。改 route 而
