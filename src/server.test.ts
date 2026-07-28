@@ -242,6 +242,40 @@ test("end to end: scheduler drives a ready issue to done on its own, board and S
   }
 });
 
+test("GET / serves the board page, and every endpoint that page calls is a real route", async () => {
+  const { loom, base, httpServer } = await startTestServer();
+  try {
+    const page = await fetch(`${base}/`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-type") ?? "", /text\/html/);
+    const html = await page.text();
+    assert.match(html, /id="board"/, "ui.html must actually be the thing being served");
+    assert.match(html, /new EventSource\("\/api\/events"\)/);
+
+    // 這份清單是 ui.html 打得出來的每一種 URL 形狀，手動同步。改 route 而
+    // 忘了改 ui.html（或反過來）時，這裡會看到 Hono 的 route-miss 404 而不是
+    // handler 自己回的 {"error":"no such workspace"}，測試就紅。
+    const paths = [
+      "/api/workspaces/nope/pause",
+      "/api/workspaces/nope/resume",
+      "/api/workspaces/nope/specs/s/merge",
+      "/api/workspaces/nope/specs/s/issues/01/redo",
+      "/api/workspaces/nope/specs/s/issues/01/acknowledge-stale",
+    ];
+    for (const path of paths) {
+      const res = await fetch(`${base}${path}`, { method: "POST" });
+      assert.equal(res.status, 404, path);
+      assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);
+    }
+
+    const board = await fetch(`${base}/api/workspaces/nope/board`);
+    assert.equal(board.status, 404);
+    assert.deepEqual(await board.json(), { error: "no such workspace" });
+  } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
 async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

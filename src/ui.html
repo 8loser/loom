@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>loom</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --dim: #8888; }
+  body { font: 14px/1.5 ui-monospace, monospace; margin: 0; padding: 1.5rem; max-width: 60rem; }
+  h1 { font-size: 1rem; margin: 0 0 1rem; }
+  h1 .dim { font-weight: normal; }
+  .ws { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 1rem; }
+  .ws > header { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap;
+                 padding: .6rem .8rem; border-bottom: 1px solid var(--line); }
+  .ws > header b { font-size: .95rem; }
+  .spec { padding: .5rem .8rem; border-top: 1px solid var(--line); }
+  .spec:first-of-type { border-top: 0; }
+  .spec > header { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .issues { list-style: none; margin: .4rem 0 0; padding: 0 0 0 1.2rem; }
+  .issues li { display: flex; gap: .6rem; align-items: center; padding: .15rem 0; }
+  .dim { color: var(--dim); }
+  .tag { border: 1px solid var(--line); border-radius: 999px; padding: 0 .5rem; font-size: .8rem; }
+  .tag.running, .tag.verifying { border-color: #2a7; color: #2a7; }
+  .tag.blocked, .tag.spec_blocked, .tag.import_needed { border-color: #d54; color: #d54; }
+  .tag.human { border-color: #e91; color: #e91; }
+  .tag.mergeable { border-color: #48f; color: #48f; }
+  .stale { color: #e91; }
+  button { font: inherit; padding: 0 .5rem; border: 1px solid var(--line);
+           border-radius: 4px; background: none; color: inherit; cursor: pointer; }
+  button:hover { border-color: currentColor; }
+  #msg { position: sticky; top: 0; padding: .4rem 0; min-height: 1.5rem; }
+  .err { color: #d54; }
+</style>
+
+<h1>loom <span class="dim" id="conn">連線中</span></h1>
+<div id="msg"></div>
+<div id="board" class="dim">載入中</div>
+
+<script>
+// 顯示用標籤。鍵對應 statemachine.ts 的 SpecDisplayStatus 與 frontmatter.ts 的
+// IssueStatus，外加 server.ts 在 spec 讀不到 front matter 時回的 import_needed。
+const SPEC_LABEL = {
+  merged: "已合併", spec_blocked: "spec 卡住", blocked: "卡住", human: "等人處理",
+  running: "執行中", verifying: "驗證中", mergeable: "可合併", queued: "排隊中",
+  draft: "草稿", import_needed: "需匯入",
+};
+const ISSUE_LABEL = {
+  draft: "草稿", ready: "待開工", implementing: "實作中", review_ready: "待審查",
+  reviewing: "審查中", test_ready: "待測試", testing: "測試中", done: "完成",
+  blocked: "卡住", human: "等人處理", dropped: "已捨棄",
+};
+const MERGE_FAIL = {
+  rebase_conflict: "rebase 衝突，spec 已標記為卡住",
+  merge_conflict: "merge 衝突，spec 已標記為卡住",
+  specs_touched: "分支改到了 specs/，spec 已標記為卡住",
+  needs_reverify: "驗證通過後 main 有新的 code，要重新驗證才能合併",
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const tag = (s, labels) => `<span class="tag ${esc(s)}">${esc(labels[s] ?? s)}</span>`;
+
+function say(text, isError) {
+  $("msg").innerHTML = text ? `<span class="${isError ? "err" : "dim"}">${esc(text)}</span>` : "";
+}
+
+async function post(url) {
+  const res = await fetch(url, { method: "POST" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? res.statusText);
+  return body;
+}
+
+function issueRow(ws, spec, issue) {
+  const actions = [];
+  // redo 對 blocked/human 是「退回重做」，對 stale 是「來源改了要重跑」；
+  // acknowledge-stale 只在有徽章時有意義。其餘狀態排程器自己會推，不給按鈕。
+  if (issue.stale || issue.status === "blocked" || issue.status === "human") {
+    actions.push(`<button data-act="redo" data-ws="${esc(ws)}" data-spec="${esc(spec)}" data-issue="${esc(issue.id)}">重做</button>`);
+  }
+  if (issue.stale) {
+    actions.push(`<button data-act="acknowledge-stale" data-ws="${esc(ws)}" data-spec="${esc(spec)}" data-issue="${esc(issue.id)}">忽略變更</button>`);
+  }
+  const blockedBy = issue.blockedBy?.length ? `<span class="dim">依賴 ${esc(issue.blockedBy.join(", "))}</span>` : "";
+  const stale = issue.stale ? '<span class="stale">來源已變更</span>' : "";
+  return `<li><span>${esc(issue.id)}</span>${tag(issue.status, ISSUE_LABEL)}${blockedBy}${stale}${actions.join("")}</li>`;
+}
+
+function specBlock(ws, spec) {
+  if (spec.status === "import_needed") {
+    return `<div class="spec"><header><b>${esc(spec.spec)}</b>${tag(spec.status, SPEC_LABEL)}
+      <span class="dim">${esc(spec.error ?? "")}</span></header></div>`;
+  }
+  const merge = spec.status === "mergeable"
+    ? `<button data-act="merge" data-ws="${esc(ws)}" data-spec="${esc(spec.spec)}">合併</button>` : "";
+  const reason = spec.blockedReason ? `<span class="dim">${esc(spec.blockedReason)}</span>` : "";
+  return `<div class="spec">
+    <header><b>${esc(spec.spec)}</b>${tag(spec.status, SPEC_LABEL)}${reason}${merge}</header>
+    <ul class="issues">${spec.issues.map((i) => issueRow(ws, spec.spec, i)).join("")}</ul>
+  </div>`;
+}
+
+function workspaceBlock(w, board) {
+  const toggle = board.paused
+    ? `<button data-act="resume" data-ws="${esc(w.name)}">繼續</button>`
+    : `<button data-act="pause" data-ws="${esc(w.name)}">暫停</button>`;
+  const state = board.paused ? '<span class="tag blocked">已暫停</span>' : '<span class="tag running">排程中</span>';
+  const err = board.error ? `<span class="err">${esc(board.error)}</span>` : "";
+  const specs = board.specs.length
+    ? board.specs.map((s) => specBlock(w.name, s)).join("")
+    : '<div class="spec dim">這個 repo 的 specs/ 底下還沒有 spec</div>';
+  return `<section class="ws">
+    <header><b>${esc(w.name)}</b>${state}<span class="dim">${esc(w.repoPath)}</span>${err}${toggle}</header>
+    ${specs}</section>`;
+}
+
+let rendering = false;
+async function render() {
+  if (rendering) return; // SSE 連續事件不必疊著跑，最後一次的結果一樣是最新的
+  rendering = true;
+  try {
+    const workspaces = await (await fetch("/api/workspaces")).json();
+    if (!workspaces.length) {
+      $("board").className = "dim";
+      $("board").textContent = "還沒有 workspace。用 POST /api/workspaces 註冊一個 repo。";
+      return;
+    }
+    const boards = await Promise.all(
+      workspaces.map((w) => fetch(`/api/workspaces/${encodeURIComponent(w.name)}/board`).then((r) => r.json())),
+    );
+    $("board").className = "";
+    $("board").innerHTML = workspaces.map((w, i) => workspaceBlock(w, boards[i])).join("");
+  } catch (err) {
+    say(`讀看板失敗：${err.message}`, true);
+  } finally {
+    rendering = false;
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const { act, ws, spec, issue } = btn.dataset;
+  const base = `/api/workspaces/${encodeURIComponent(ws)}`;
+  const url = act === "pause" || act === "resume"
+    ? `${base}/${act}`
+    : act === "merge"
+      ? `${base}/specs/${encodeURIComponent(spec)}/merge`
+      : `${base}/specs/${encodeURIComponent(spec)}/issues/${encodeURIComponent(issue)}/${act}`;
+  btn.disabled = true;
+  say("");
+  try {
+    const result = await post(url);
+    if (act === "merge") {
+      say(result.merged ? `${spec} 已合併` : MERGE_FAIL[result.reason] ?? `合併失敗：${result.reason}`, !result.merged);
+    }
+  } catch (err) {
+    say(`${act} 失敗：${err.message}`, true);
+  } finally {
+    await render(); // 動作的結果一律靠重抓 board 呈現，不在前端猜狀態
+  }
+});
+
+// SSE 只送「哪個 workspace 變了」，前端一律重抓整個看板，不做增量更新。
+const events = new EventSource("/api/events");
+events.addEventListener("connected", () => { $("conn").textContent = "已連線"; });
+events.addEventListener("board-changed", render);
+events.onerror = () => { $("conn").textContent = "連線中斷，重試中"; };
+
+render();
+</script>

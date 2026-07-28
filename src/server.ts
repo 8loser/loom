@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,9 @@ import {
   type AgentRunner,
   type TestRunner,
 } from "./orchestrator.ts";
+
+// 看板頁。啟動時讀一次，跟著 server.ts 一起發佈，沒有 build step。
+const UI = readFileSync(new URL("./ui.html", import.meta.url), "utf8");
 
 // ponytail: 真的 dev server 生命週期（loom:test/loom:e2e、port 分配）還沒做
 // （見 DESIGN.md「dev server 生命週期」），testing 階段先全部當綠燈通過，
@@ -86,7 +89,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
 
   const app = new Hono();
 
-  app.get("/", (c) => c.json({ ok: true, workspaces: handles.size }));
+  app.get("/", (c) => c.html(UI));
 
   app.get("/api/workspaces", (c) => c.json(listWorkspaces(db)));
 
