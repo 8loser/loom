@@ -349,3 +349,97 @@ export function getVerifiedMainSha(
     .get(workspaceId, spec) as { verified_main_sha: string | null } | undefined;
   return row?.verified_main_sha ?? null;
 }
+
+export interface SpecRunAggregate {
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  earliestStartedAt: number | null;
+  latestFinishedAt: number | null;
+  stillRunning: boolean;
+}
+
+/** 看板用：一個 spec 至今所有 run 的花費/token 總和與耗時範圍。 */
+export function getSpecRunAggregate(db: Db, workspaceId: number, spec: string): SpecRunAggregate {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS cost_usd,
+              COALESCE(SUM(input_tokens), 0) AS input_tokens,
+              COALESCE(SUM(output_tokens), 0) AS output_tokens,
+              MIN(started_at) AS earliest_started_at,
+              MAX(finished_at) AS latest_finished_at,
+              SUM(CASE WHEN finished_at IS NULL THEN 1 ELSE 0 END) AS open_count
+       FROM runs WHERE workspace_id = ? AND spec = ?`,
+    )
+    .get(workspaceId, spec) as Record<string, unknown>;
+  return {
+    costUsd: row.cost_usd as number,
+    inputTokens: row.input_tokens as number,
+    outputTokens: row.output_tokens as number,
+    earliestStartedAt: row.earliest_started_at as number | null,
+    latestFinishedAt: row.latest_finished_at as number | null,
+    stillRunning: (row.open_count as number) > 0,
+  };
+}
+
+export interface TodayRunAggregate {
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** topbar meters 用：sinceMs 之後啟動的 run 的花費/token 總和。 */
+export function getTodayRunAggregate(db: Db, workspaceId: number, sinceMs: number): TodayRunAggregate {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS cost_usd,
+              COALESCE(SUM(input_tokens), 0) AS input_tokens,
+              COALESCE(SUM(output_tokens), 0) AS output_tokens
+       FROM runs WHERE workspace_id = ? AND started_at >= ?`,
+    )
+    .get(workspaceId, sinceMs) as Record<string, unknown>;
+  return {
+    costUsd: row.cost_usd as number,
+    inputTokens: row.input_tokens as number,
+    outputTokens: row.output_tokens as number,
+  };
+}
+
+export interface LatestRun {
+  role: Role;
+  attempt: number;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
+/** issue 詳情面板用：這個 issue 最近一次（不論成功與否）的 run。 */
+export function getLatestRun(db: Db, workspaceId: number, spec: string, issue: string): LatestRun | null {
+  const row = db
+    .prepare(
+      `SELECT role, attempt, started_at, finished_at FROM runs
+       WHERE workspace_id = ? AND spec = ? AND issue = ?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(workspaceId, spec, issue) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    role: row.role as Role,
+    attempt: row.attempt as number,
+    startedAt: row.started_at as number,
+    finishedAt: row.finished_at as number | null,
+  };
+}
+
+/** spec 詳情面板用：最近一次成功的 spec_reviewer 意見（不決定流程，只給人看）。 */
+export function getSpecReviewComments(db: Db, workspaceId: number, spec: string): string[] | null {
+  const row = db
+    .prepare(
+      `SELECT verdict_json FROM runs
+       WHERE workspace_id = ? AND spec = ? AND issue IS NULL AND role = 'spec_reviewer' AND outcome = 'ok'
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(workspaceId, spec) as { verdict_json: string | null } | undefined;
+  if (!row?.verdict_json) return null;
+  const parsed = JSON.parse(row.verdict_json) as { comments?: string[] };
+  return parsed.comments ?? [];
+}

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,8 @@ import { openDb, listWorkspaces, insertWorkspace, getWorkspace, type Workspace }
 import { createClaudeAgentRunner, DEFAULT_PROMPTS } from "./agent.ts";
 import {
   listSpecs,
-  getSpecBoard,
+  getSpecBoardDetail,
+  getWorkspaceSummary,
   attemptMerge,
   redoIssue,
   acknowledgeStale,
@@ -19,6 +20,9 @@ import {
   type AgentRunner,
   type TestRunner,
 } from "./orchestrator.ts";
+
+// 看板頁。啟動時讀一次，跟著 server.ts 一起發佈，沒有 build step。
+const UI = readFileSync(new URL("./ui.html", import.meta.url), "utf8");
 
 // ponytail: 真的 dev server 生命週期（loom:test/loom:e2e、port 分配）還沒做
 // （見 DESIGN.md「dev server 生命週期」），testing 階段先全部當綠燈通過，
@@ -86,7 +90,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
 
   const app = new Hono();
 
-  app.get("/", (c) => c.json({ ok: true, workspaces: handles.size }));
+  app.get("/", (c) => c.html(UI));
 
   app.get("/api/workspaces", (c) => c.json(listWorkspaces(db)));
 
@@ -117,7 +121,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     if (!handle) return c.json({ error: "no such workspace" }, 404);
     const specs = listSpecs(handle.ctx).map((spec) => {
       try {
-        return getSpecBoard(handle.ctx, spec);
+        return getSpecBoardDetail(handle.ctx, spec);
       } catch (err) {
         // 還沒 import（沒有 front matter）或格式不對，board 上顯示出來但不
         // 是排程器該處理的狀態，交給「匯入既有 specs 資料夾」那條路。
@@ -128,7 +132,12 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
         };
       }
     });
-    return c.json({ paused: handle.scheduler.isPaused(), error: handle.scheduler.getError(), specs });
+    return c.json({
+      paused: handle.scheduler.isPaused(),
+      error: handle.scheduler.getError(),
+      summary: getWorkspaceSummary(handle.ctx),
+      specs,
+    });
   });
 
   app.post("/api/workspaces/:name/pause", (c) => {

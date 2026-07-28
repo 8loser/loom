@@ -10,6 +10,10 @@ import {
   setIssueBaseSha,
   bumpRetry,
   clearIssueState,
+  getSpecRunAggregate,
+  getTodayRunAggregate,
+  getLatestRun,
+  getSpecReviewComments,
 } from "./db.ts";
 
 test("workspace round-trip", () => {
@@ -99,4 +103,83 @@ test("issue_state tracks base_sha and independent retry counters", () => {
   assert.equal(cleared.baseSha, null);
 
   db.close();
+});
+
+function usage(costUsd: number, inputTokens: number, outputTokens: number) {
+  return { durationMs: 1000, inputTokens, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens, costUsd };
+}
+
+test("getSpecRunAggregate: sums cost/tokens across runs, tracks whether anything is still open", () => {
+  const db = openDb(":memory:");
+  const wsId = insertWorkspace(db, {
+    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
+  });
+
+  const empty = getSpecRunAggregate(db, wsId, "no-runs-yet");
+  assert.deepEqual(empty, {
+    costUsd: 0, inputTokens: 0, outputTokens: 0,
+    earliestStartedAt: null, latestFinishedAt: null, stillRunning: false,
+  });
+
+  const r1 = startRun(db, { workspaceId: wsId, spec: "s", issue: "01", role: "coder", attempt: 1, baseSha: "a" });
+  finishRun(db, r1, { outcome: "ok", usage: usage(0.1, 100, 10) });
+  const r2 = startRun(db, { workspaceId: wsId, spec: "s", issue: "01", role: "issue_reviewer", attempt: 1, baseSha: "a" });
+  finishRun(db, r2, { outcome: "ok", usage: usage(0.05, 50, 5) });
+
+  const done = getSpecRunAggregate(db, wsId, "s");
+  assert.equal(done.costUsd, 0.15000000000000002);
+  assert.equal(done.inputTokens, 150);
+  assert.equal(done.outputTokens, 15);
+  assert.equal(done.stillRunning, false);
+  assert.ok(done.earliestStartedAt !== null && done.latestFinishedAt !== null);
+
+  startRun(db, { workspaceId: wsId, spec: "s", issue: "02", role: "coder", attempt: 1, baseSha: "b" });
+  assert.equal(getSpecRunAggregate(db, wsId, "s").stillRunning, true, "an unfinished run must flip stillRunning");
+
+  db.close();
+});
+
+test("getTodayRunAggregate: only counts runs started at or after the cutoff", () => {
+  const db = openDb(":memory:");
+  const wsId = insertWorkspace(db, {
+    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
+  });
+  const r1 = startRun(db, { workspaceId: wsId, spec: "s", issue: "01", role: "coder", attempt: 1, baseSha: "a" });
+  finishRun(db, r1, { outcome: "ok", usage: usage(1, 10, 1) });
+
+  assert.deepEqual(getTodayRunAggregate(db, wsId, Date.now() + 1000), { costUsd: 0, inputTokens: 0, outputTokens: 0 });
+  assert.deepEqual(getTodayRunAggregate(db, wsId, Date.now() - 1000), { costUsd: 1, inputTokens: 10, outputTokens: 1 });
+});
+
+test("getLatestRun: most recent run for an issue by insertion order, null when there's none", () => {
+  const db = openDb(":memory:");
+  const wsId = insertWorkspace(db, {
+    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
+  });
+  assert.equal(getLatestRun(db, wsId, "s", "01"), null);
+
+  const r1 = startRun(db, { workspaceId: wsId, spec: "s", issue: "01", role: "coder", attempt: 1, baseSha: "a" });
+  finishRun(db, r1, { outcome: "ok", usage: usage(0, 0, 0) });
+  startRun(db, { workspaceId: wsId, spec: "s", issue: "01", role: "issue_reviewer", attempt: 1, baseSha: "a" });
+
+  const latest = getLatestRun(db, wsId, "s", "01");
+  assert.equal(latest?.role, "issue_reviewer");
+  assert.equal(latest?.finishedAt, null, "the still-running row must report finishedAt: null");
+});
+
+test("getSpecReviewComments: parses the latest successful spec_reviewer run, null when there's none", () => {
+  const db = openDb(":memory:");
+  const wsId = insertWorkspace(db, {
+    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
+  });
+  assert.equal(getSpecReviewComments(db, wsId, "s"), null);
+
+  const runId = startRun(db, { workspaceId: wsId, spec: "s", issue: null, role: "spec_reviewer", attempt: 1, baseSha: null });
+  finishRun(db, runId, { outcome: "ok", usage: usage(0, 0, 0), verdict: { comments: ["dedupe X"] } });
+
+  assert.deepEqual(getSpecReviewComments(db, wsId, "s"), ["dedupe X"]);
 });

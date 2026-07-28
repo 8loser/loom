@@ -169,6 +169,32 @@ export function mergeSpecIntoMain(
   return { ok: false, conflict: true };
 }
 
+/**
+ * 看板「落後 main」欄位：main 已經有、spec branch 還沒 rebase 進來的
+ * commit 數。分支不存在（spec 還沒開工）回 null，不當成錯誤。
+ */
+export function commitsBehind(repoPath: string, branch: string, mainBranch: string): number | null {
+  if (!gitOk(repoPath, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])) return null;
+  return Number(git(repoPath, ["rev-list", "--count", `${branch}..${mainBranch}`]));
+}
+
+export interface DiffStat {
+  insertions: number;
+  deletions: number;
+}
+
+/** issue 詳情面板的 +/- 統計。worktree 不存在（還沒開工、或 spec 已合併移除）回 null。 */
+export function diffShortStat(worktreePath: string, baseSha: string): DiffStat | null {
+  if (!existsSync(worktreePath)) return null;
+  const out = git(worktreePath, ["diff", "--shortstat", `${baseSha}..HEAD`]);
+  const insertions = /(\d+) insertion/.exec(out);
+  const deletions = /(\d+) deletion/.exec(out);
+  return {
+    insertions: insertions ? Number(insertions[1]) : 0,
+    deletions: deletions ? Number(deletions[1]) : 0,
+  };
+}
+
 export function removeWorktreeAndBranch(
   repoPath: string,
   worktreePath: string,

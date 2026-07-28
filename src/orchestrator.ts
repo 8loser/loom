@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { Db, RunUsage, Workspace } from "./db.ts";
+import type { Db, RunUsage, Role, Workspace } from "./db.ts";
 import {
   startRun,
   finishRun,
@@ -15,6 +15,10 @@ import {
   clearIssueState,
   setVerifiedMainSha,
   getVerifiedMainSha,
+  getSpecRunAggregate,
+  getTodayRunAggregate,
+  getLatestRun,
+  getSpecReviewComments,
 } from "./db.ts";
 import {
   readIssueFrontMatter,
@@ -38,6 +42,8 @@ import {
   threeStageClean,
   mergeSpecIntoMain,
   removeWorktreeAndBranch,
+  commitsBehind,
+  diffShortStat,
 } from "./git.ts";
 import {
   nextDispatchable,
@@ -127,8 +133,12 @@ function specPath(ctx: Ctx, spec: string): string {
   return join(specDir(ctx, spec), "spec.md");
 }
 
-interface IssueFile extends IssueNode {
+export interface IssueFile extends IssueNode {
   path: string;
+  /** 檔名去掉編號前綴與副檔名，看板卡片顯示用（例：01-add-greeting.md -> add-greeting）。 */
+  title: string;
+  /** front matter 的 e2e 旗標，看板用來標「這個 issue 要跑 e2e」。 */
+  e2e: boolean;
   /**
    * 來源過期：這個 issue 完成後，spec.md 或它自己的 issue 檔內容被改過。
    * 純 derived，不進 front matter、不是第十二個狀態、不擋 merge -- 只是看板
@@ -167,6 +177,8 @@ export function loadIssues(ctx: Ctx, spec: string): IssueFile[] {
     return {
       id,
       path,
+      title: f.replace(/^\d+-/, "").replace(/\.md$/, ""),
+      e2e: fm.e2e,
       status: fm.status,
       blockedBy: fm.blockedBy,
       stale: fm.status === "done" && was !== undefined && was !== sourceHash(specBody, raw),
@@ -232,6 +244,22 @@ function feedbackFor(ctx: Ctx, spec: string, issue: string): string | undefined 
     | undefined;
   if (!row) return undefined;
   return row.verdict_json ?? row.summary ?? undefined;
+}
+
+/**
+ * feedbackFor 給 coder 當 prompt context 用，reviewer 打回的原始形狀是
+ * {verdict, comments[]} 的 JSON -- coder 讀得懂 JSON，不必轉換。看板要給
+ * 人看，把 comments 攤平成一行；不是 JSON（test 失敗那條路徑存的是純文字
+ * summary）就照原樣顯示。
+ */
+function humanizeFeedback(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { comments?: string[] };
+    if (Array.isArray(parsed.comments)) return parsed.comments.join("; ");
+  } catch {
+    // 不是 JSON，照原樣回傳
+  }
+  return raw;
 }
 
 export interface StepResult {
@@ -360,7 +388,14 @@ async function doIssueReview(ctx: Ctx, spec: string, issue: IssueFile): Promise<
   }
 
   const verdict = resp.issueReview!;
-  finishRun(ctx.db, runId, { outcome: "ok", usage: resp.usage, verdict });
+  // review reject 是 DESIGN.md「失敗與重試」表格裡的 domain 事件，跟 test
+  // fail 同一類 -- 記成 domain_fail 而不是 ok，feedbackFor 才找得到它，
+  // 下一次 attempt 的 coder 才看得到 reviewer 實際打回的理由。
+  finishRun(ctx.db, runId, {
+    outcome: verdict.verdict === "pass" ? "ok" : "domain_fail",
+    usage: resp.usage,
+    verdict,
+  });
 
   if (verdict.verdict === "pass") {
     writeIssueStatus(ctx, spec, issue, "test_ready");
@@ -687,6 +722,134 @@ export function getSpecBoard(ctx: Ctx, spec: string): SpecBoard {
     verifyResult,
   });
   return { spec, status, merged: fm.merged, blockedReason: fm.blockedReason, issues };
+}
+
+export interface CurrentIssueLive {
+  id: string;
+  role: Role;
+  attempt: number;
+  startedAt: number;
+  diffStat: { insertions: number; deletions: number } | null;
+}
+
+export interface SpecBoardDetail extends SpecBoard {
+  branch: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** null 代表這個 spec 從沒跑過任何 run。 */
+  elapsedMs: number | null;
+  /** null 代表 spec branch 還不存在（還沒開工）或已經合併移除。 */
+  behindMain: number | null;
+  specReviewComments: string[] | null;
+  /** 目前正在跑的 issue（mid-state 且有一筆未結束的 run），沒有就是 null。 */
+  currentIssue: CurrentIssueLive | null;
+  /** issue id -> 最近一次 review/test 打回的意見，只列有過打回紀錄的 issue。 */
+  issueFailures: Record<string, string>;
+  /** issue id -> 目前這一輪的重試次數，只列跑過至少一次的 issue。 */
+  issueRetries: Record<string, { domain: number; infra: number }>;
+  /** 看板顯示「N / 上限」用，跟 handleDomainFail/handleInfraFail 是同一份常數。 */
+  domainMaxAttempts: number;
+  infraMaxAttempts: number;
+}
+
+/**
+ * 看板詳情：在 getSpecBoard 之上疊 cost/token/耗時/落後 main/現正執行中的
+ * issue。刻意獨立成另一個函式，不擴充 getSpecBoard 本身 -- 後者被排程器
+ * 每個 tick 呼叫一次，這裡的 git subprocess 與 SQL 聚合只有 HTTP 看板
+ * 端點需要，不該進排程的熱路徑。狀態聚合邏輯仍只有 getSpecBoard 一份
+ * （呼叫它，不重算），沒有違反 DESIGN.md 的單一權威原則。
+ */
+export function getSpecBoardDetail(ctx: Ctx, spec: string): SpecBoardDetail {
+  const board = getSpecBoard(ctx, spec);
+  const agg = getSpecRunAggregate(ctx.db, ctx.workspace.id, spec);
+  const elapsedMs =
+    agg.earliestStartedAt === null
+      ? null
+      : (agg.stillRunning ? Date.now() : agg.latestFinishedAt ?? Date.now()) - agg.earliestStartedAt;
+
+  const branch = `spec/${spec}`;
+  const behindMain = board.merged
+    ? null
+    : commitsBehind(ctx.workspace.repoPath, branch, ctx.workspace.mainBranch);
+
+  // 「一個 spec 一個 worktree，任何時刻最多一個 issue 在中間狀態」
+  // （statemachine.ts nextDispatchable 的不變量）-- 直接找那個 issue，
+  // 不透過 nextDispatchable：它找的是下一個「該派工」的，issue 已經在
+  // mid-state 時它回傳 null（沒有新東西可派），語意跟這裡要的相反。
+  const midStateIssue = board.issues.find((i) => MID_STATES.includes(i.status));
+  let currentIssue: CurrentIssueLive | null = null;
+  if (midStateIssue) {
+    const latest = getLatestRun(ctx.db, ctx.workspace.id, spec, midStateIssue.id);
+    if (latest && latest.finishedAt === null) {
+      const state = getIssueState(ctx.db, ctx.workspace.id, spec, midStateIssue.id);
+      currentIssue = {
+        id: midStateIssue.id,
+        role: latest.role,
+        attempt: latest.attempt,
+        startedAt: latest.startedAt,
+        diffStat:
+          latest.role === "issue_reviewer" && state.baseSha
+            ? diffShortStat(worktreePath(ctx, spec), state.baseSha)
+            : null,
+      };
+    }
+  }
+
+  const issueFailures: Record<string, string> = {};
+  const issueRetries: Record<string, { domain: number; infra: number }> = {};
+  for (const issue of board.issues) {
+    const fb = feedbackFor(ctx, spec, issue.id);
+    if (fb) issueFailures[issue.id] = humanizeFeedback(fb);
+    const state = getIssueState(ctx.db, ctx.workspace.id, spec, issue.id);
+    if (state.domainRetries > 0 || state.infraRetries > 0) {
+      issueRetries[issue.id] = { domain: state.domainRetries, infra: state.infraRetries };
+    }
+  }
+
+  return {
+    ...board,
+    branch,
+    costUsd: agg.costUsd,
+    inputTokens: agg.inputTokens,
+    outputTokens: agg.outputTokens,
+    elapsedMs,
+    behindMain,
+    specReviewComments: getSpecReviewComments(ctx.db, ctx.workspace.id, spec),
+    currentIssue,
+    issueFailures,
+    issueRetries,
+    domainMaxAttempts: DOMAIN_MAX_ATTEMPTS,
+    infraMaxAttempts: INFRA_MAX_ATTEMPTS,
+  };
+}
+
+export interface WorkspaceSummary {
+  /** 近 24 小時（rolling window，不是行事曆上的今天，見 ui.html 的標籤文字）。 */
+  recentCostUsd: number;
+  recentInputTokens: number;
+  recentOutputTokens: number;
+  /** 目前有 mid-state issue 在跑的 spec 數。 */
+  runningCount: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function getWorkspaceSummary(ctx: Ctx): WorkspaceSummary {
+  const today = getTodayRunAggregate(ctx.db, ctx.workspace.id, Date.now() - DAY_MS);
+  const runningCount = listSpecs(ctx).filter((spec) => {
+    try {
+      return getSpecBoard(ctx, spec).status === "running";
+    } catch {
+      return false;
+    }
+  }).length;
+  return {
+    recentCostUsd: today.costUsd,
+    recentInputTokens: today.inputTokens,
+    recentOutputTokens: today.outputTokens,
+    runningCount,
+  };
 }
 
 const DRIVEN_STATUSES: SpecDisplayStatus[] = ["queued", "running", "verifying"];
