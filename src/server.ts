@@ -24,6 +24,7 @@ import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
 import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
 import { createDevServerTestRunner, readKnownScripts, KNOWN_SCRIPT_NAMES } from "./devserver.ts";
 import { sendChatMessage, finalizeChatDraft, stopAllChatProcesses } from "./chat.ts";
+import { listBranches } from "./git.ts";
 import {
   listSpecs,
   getSpecBoardDetail,
@@ -107,6 +108,27 @@ function parseWorkspaceSettings(
   }
 
   return { ok: { specsDir, mainBranch, portRangeStart, portRangeEnd, parallelLimit } };
+}
+
+/**
+ * spec 資料夾的候選清單。掃兩層就停，也不列 .git / node_modules --
+ * 這只是省去手打 `specs`、`docs/specs` 這種常見值，不是檔案總管，而且
+ * 資料夾還不存在時仍然要能直接輸入（所以前端用 datalist 不是 select）。
+ */
+function listSubdirs(root: string, depth = 2, prefix = ""): string[] {
+  if (depth === 0) return [];
+  let entries;
+  try {
+    entries = readdirSync(join(root, prefix), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
+    .flatMap((e) => {
+      const path = prefix ? `${prefix}/${e.name}` : e.name;
+      return [path, ...listSubdirs(root, depth - 1, path)];
+    });
 }
 
 export interface LoomServer {
@@ -307,6 +329,10 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       // 加一個階段（例如 typecheck）要改兩個地方，而設定頁少列一個沒人會發現。
       scriptNames: KNOWN_SCRIPT_NAMES,
       scripts: readKnownScripts(ws.repoPath),
+      // 這兩欄的選項。分支是封閉集合（選單），spec 資料夾可以是還沒建的
+      // 新資料夾（可輸入的建議清單）。
+      branches: listBranches(ws.repoPath),
+      specDirs: listSubdirs(ws.repoPath),
     });
   });
 

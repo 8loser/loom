@@ -399,6 +399,13 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
       ["loom:setup", "loom:typecheck", "loom:dev", "loom:test", "loom:e2e"],
       "the page renders this list, so it must come from devserver.ts rather than being hardcoded in ui.html",
     );
+    // 設定頁把主分支畫成選單、spec 資料夾畫成建議清單，選項都得從這裡來。
+    assert.deepEqual(s.branches, ["main"]);
+    assert.deepEqual(
+      s.specDirs,
+      ["specs", "specs/demo"],
+      "two levels deep, and .git is not listed",
+    );
   } finally {
     await stopTestServer(loom, httpServer);
   }
