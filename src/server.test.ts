@@ -144,7 +144,20 @@ test("browse lists sub-directories and flags which ones are git repos", async ()
     assert.equal(entry.isRepo, true, ".git is what marks a directory as pickable");
 
     const inside = await fetch(`${base}/api/browse?path=${encodeURIComponent(repoPath)}`);
-    assert.equal((await inside.json()).isRepo, true);
+    const insideBody = await inside.json();
+    assert.equal(insideBody.isRepo, true);
+    assert.equal(
+      insideBody.dirs.some((d: { name: string }) => d.name.startsWith(".")),
+      false,
+      ". 開頭的預設不列（選 repo 的選取器從家目錄開始，全列會被 .cache 那些淹掉）",
+    );
+
+    // 設定頁的 spec 資料夾用這個參數：spec 放在 .claude/ 之類的地方是正常的。
+    const all = await fetch(`${base}/api/browse?path=${encodeURIComponent(repoPath)}&hidden=1`);
+    assert.ok(
+      (await all.json()).dirs.some((d: { name: string }) => d.name === ".git"),
+      "hidden=1 連 . 開頭的一起列",
+    );
 
     const missing = await fetch(`${base}/api/browse?path=${encodeURIComponent(join(repoPath, "no-such-dir"))}`);
     assert.equal(missing.status, 400, "unreadable path is an error, not an empty listing");

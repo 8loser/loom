@@ -174,8 +174,12 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
   // agent，列目錄名是更小的權限，限制在 homedir 之下反而擋掉 repo 放 /mnt、
   // /srv 的正常用法。前提是 server 綁 127.0.0.1（見檔案最後的 serve()）--
   // 哪天要對外開，這條跟 workspaces 那條都得先有驗證。
+  // hidden=1 連 . 開頭的資料夾一起列。設定頁的 spec 資料夾要（spec 放在
+  // .claude/ 這種地方是正常的），選 repo 那邊不要 -- 那個選取器從家目錄開始，
+  // 全列會被 .cache、.config、.local 淹掉。
   app.get("/api/browse", (c) => {
     const path = resolve(c.req.query("path") || homedir());
+    const hidden = c.req.query("hidden") === "1";
     let entries;
     try {
       entries = readdirSync(path, { withFileTypes: true });
@@ -183,7 +187,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
     const dirs = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .filter((e) => e.isDirectory() && (hidden || !e.name.startsWith(".")))
       .map((e) => ({ name: e.name, isRepo: existsSync(join(path, e.name, ".git")) }))
       .sort((a, b) => a.name.localeCompare(b.name));
     const parent = dirname(path);

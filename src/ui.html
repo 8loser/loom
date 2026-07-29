@@ -1201,11 +1201,16 @@ let pickerPath = null;
 // 擋掉，不如一開始就不給走。根目錄本身也不是合法的 spec 資料夾，所以在那一層
 // 「選這個資料夾」是關掉的。
 let pickerRoot = null;
+// . 開頭的資料夾要不要列。跟 pickerRoot 分開存：兩個開關剛好都只有 spec
+// 資料夾那邊要開，但它們是兩件事。
+let pickerHidden = false;
 
 async function loadPicker(path) {
   let data;
   try {
-    data = await api(`/api/browse?path=${encodeURIComponent(path ?? "")}`);
+    data = await api(
+      `/api/browse?path=${encodeURIComponent(path ?? "")}${pickerHidden ? "&hidden=1" : ""}`,
+    );
   } catch (err) {
     // 起始路徑可能還不存在（spec 資料夾常是新的），退回根目錄而不是停在死路。
     if (pickerRoot && path !== pickerRoot) return loadPicker(pickerRoot);
@@ -1224,9 +1229,10 @@ async function loadPicker(path) {
     ).join("");
 }
 
-function openPicker(start, root, onPick) {
+function openPicker(start, { root = null, hidden = false }, onPick) {
   const dlg = $("picker");
   pickerRoot = root;
+  pickerHidden = hidden;
   loadPicker(start);
   dlg.addEventListener("close", () => {
     if (dlg.returnValue) onPick(dlg.returnValue);
@@ -1235,7 +1241,7 @@ function openPicker(start, root, onPick) {
 }
 
 function browseForRepo() {
-  openPicker($("new-ws-path").value.trim() || null, null, (path) => {
+  openPicker($("new-ws-path").value.trim() || null, {}, (path) => {
     $("new-ws-path").value = path;
     if (!$("new-ws-name").value.trim()) $("new-ws-name").value = path.split("/").pop();
   });
@@ -1245,7 +1251,7 @@ function browseForRepo() {
 function browseForSpecDir() {
   const root = settings.workspace.repoPath.replace(/\/+$/, "");
   const current = $("s-specs").value.trim();
-  openPicker(current ? `${root}/${current}` : root, root, (path) => {
+  openPicker(current ? `${root}/${current}` : root, { root, hidden: true }, (path) => {
     $("s-specs").value = path.slice(root.length + 1);
   });
 }
