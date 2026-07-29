@@ -462,19 +462,21 @@ orchestrator 把測試 stdout 存進 DB，coder 下一輪的 prompt 帶最後 20
 
 ## chat 產 spec
 
-常駐 `claude -p --input-format stream-json --output-format stream-json`，web 端雙向串接，cwd 在 main checkout。
+常駐 `claude -p --input-format stream-json --output-format stream-json`，web 端雙向串接，cwd 在 main checkout。實作在 `src/chat.ts`：一個 workspace 同時只有一份進行中的討論（`chat_sessions` 表，`workspace_id` 當 PK），對應 mockup 上單一討論分頁、單一 thread 的畫面。
 
-加 `--disallowedTools Write Edit`：它要能讀 repo code 才討論得具體，但不該碰任何檔案。
+**工具限制不是 `--disallowedTools Write Edit`，是 `--tools Read,Glob,Grep` 白名單。** 原計畫擋 Write/Edit 是想著「它要能讀 repo code 才討論得具體，但不該碰任何檔案」，但實測發現 `--disallowedTools Write Edit` 只擋了那兩個工具名，`Bash` 沒被擋，而 agent 發現 Write 被擋之後會自己改用 `Bash` 的 heredoc（`cat > file <<EOF`）照樣寫成功。改用白名單就是結構上只剩 Read/Glob/Grep 三個工具可用，Bash 根本不在清單裡，沒有繞路可走 -- 跟 issue reviewer 用的是同一份清單（`agent.ts` 的 `READ_ONLY_TOOLS`），不是另外發明一套。
+
+常駐 process 是效能優化（同一個 process 上的每一輪吃得到 prompt cache），不是正確性要求：`session_id` 落 DB，process 閒置逾時（10 分鐘）或意外死掉都用 `--resume` 補一個新的，對話從模型角度不斷。**兩個 process 不能同時碰同一個 session** -- 定稿前一定要先把常駐 process 完全結束（等到 `close` 事件，不是叫了 `stdin.end()` 就當結束），再用一次性呼叫 `--resume` 疊上去，不然會拿到「找不到這個 session」（`--resume` 也綁 cwd，同一個 session 用不同 cwd 去 resume 一樣找不到）。
 
 **拆 issue 在同一輪對話裡做**，不另外派 agent。拆分方式是設計決策：哪些改動綁在一起、誰先誰後、依賴邊怎麼連，這是人最該介入的地方。
 
-落地時 agent 只用 `--json-schema` 產內容，orchestrator 負責編號、生 front matter、寫檔。狀態欄位不能讓 LLM 寫。
+落地時疊一次 `--resume` + `--json-schema` 的一次性呼叫（不是常駐 process 那條線）拿 `{slug, spec_md, issues[{title, body, blocked_by[], e2e, needs_human}]}`，orchestrator（`createSpecFromDraft`）負責編號、生 front matter、寫檔、commit 一次。狀態欄位不能讓 LLM 寫。`blocked_by` 在 draft 裡引用的是其他 issue 的 `title`（LLM 產出當下還不知道最終編號），落地時才按順序轉成 `01`/`02` 這種 id。`slug` 沒通過 kebab-case 檢查就從 `spec_md` 的內容 slugify 退回，不讓一個格式錯誤擋住整個定稿。
 
 schema 裡的 `needs_human` 是分類旗標不是狀態欄位，跟 `e2e` 同一層級 -- 由 orchestrator 決定寫成 `human` 還是 `ready`。沒有它的話，chat 裡討論出「需要判斷、需要外部存取」的 issue 只能標成 ready，然後發生的正是 `human` 狀態要避免的浪費：被 agent 抓走、撞牆三次、進 blocked。
 
-**定稿按鈕就是開跑按鈕。** 剛討論完內容已經看過，再插一道 draft review 是多餘摩擦。手寫丟進資料夾的 draft spec 才需要看板上的放行按鈕。
+**定稿按鈕就是開跑按鈕。** 剛討論完內容已經看過，再插一道 draft review 是多餘摩擦，UI 上沒有「先看草稿再確認」兩步 -- 按下「建立並開始執行」直接寫檔、commit、喚醒排程器，切去看板看新 spec。手寫丟進資料夾的 draft spec 才需要看板上的放行按鈕。
 
-開跑後只能改還沒開始的 issue，可以追加新 issue，進行中和已完成的鎖住。orchestrator 本來就在派工前才讀 issue 檔案，所以這幾乎零成本。修改走 `--resume` 回到原對話以維持 spec.md 一致性，或直接編輯檔案。
+定稿那一刻把這次討論的 `session_id` 從 `chat_sessions` 搬進 `spec_state.chat_session_id`，`chat_sessions` 那列刪掉。**開跑後只能改還沒開始的 issue，可以追加新 issue，進行中和已完成的鎖住** -- 這條規則本身還沒有介面實作，`chat_session_id` 先落地是為它鋪路：orchestrator 本來就在派工前才讀 issue 檔案，所以這幾乎零成本。修改走 `--resume` 回到原對話以維持 spec.md 一致性，或直接編輯檔案。
 
 ## 實作
 
@@ -517,6 +519,15 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 ```
 
 `overageStatus: "rejected"` 只代表這個帳號沒開啟超額付費，是常態設定。曾經把它當成判定條件，在 `--output-format json` 的路徑下沒有症狀（那條路徑看不到 `rate_limit_event`），但一改用 stream-json 就變成每一次呼叫都被判成用量用盡、orchestrator 第一次呼叫就停住。判定只看 `status`。真的撞到上限時 `status` 會是什麼值還沒有樣本，所以維持保守預設：判不出來走 `infra_fail`（重試三次），不是 `usage_exhausted`（整條停住）。
+
+**第二個實測樣本補上一個 `status` 值：`allowed_warning`。** 開發 chat 那條長駐 process 時，帳號剛好用到 five_hour 視窗 93%，撞到了：
+
+```json
+{ "status": "allowed_warning", "rateLimitType": "five_hour", "resetsAt": 1785313200,
+  "utilization": 0.93, "isUsingOverage": false, "surpassedThreshold": 0.9 }
+```
+
+呼叫本身 `is_error: false`、`subtype: success`，跟 `"allowed"` 沒有兩樣，只是多一個「快到門檻了」的提醒 -- 原本只認字面 `"allowed"` 的判定會把它當成用量用盡，整條 chat 對話第一輪就被判死。跟 `overageStatus:"rejected"` 是同一種錯：把「還在可用範圍內的附加資訊」當成「不可用」。`src/claude.ts` 現在認 `["allowed", "allowed_warning"]` 兩個值，其餘一律走用量用盡判定。
 
 ### agent 繼承什麼環境
 

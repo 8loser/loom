@@ -14,6 +14,9 @@ import {
   getTodayRunAggregate,
   getLatestRun,
   getSpecReviewComments,
+  getChatDraft,
+  saveChatDraft,
+  deleteChatDraft,
 } from "./db.ts";
 
 test("workspace round-trip", () => {
@@ -182,4 +185,24 @@ test("getSpecReviewComments: parses the latest successful spec_reviewer run, nul
   finishRun(db, runId, { outcome: "ok", usage: usage(0, 0, 0), verdict: { comments: ["dedupe X"] } });
 
   assert.deepEqual(getSpecReviewComments(db, wsId, "s"), ["dedupe X"]);
+});
+
+test("chat draft: empty until saved, round-trips transcript and session_id, gone after delete", () => {
+  const db = openDb(":memory:");
+  const wsId = insertWorkspace(db, {
+    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
+  });
+  assert.deepEqual(getChatDraft(db, wsId), { sessionId: null, transcript: [] });
+
+  saveChatDraft(db, wsId, {
+    sessionId: "s-1",
+    transcript: [{ role: "user", text: "hi", at: 1 }, { role: "assistant", text: "hello", at: 2 }],
+  });
+  const draft = getChatDraft(db, wsId);
+  assert.equal(draft.sessionId, "s-1");
+  assert.equal(draft.transcript.length, 2);
+
+  deleteChatDraft(db, wsId);
+  assert.deepEqual(getChatDraft(db, wsId), { sessionId: null, transcript: [] });
 });

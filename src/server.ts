@@ -15,11 +15,13 @@ import {
   getPrompts,
   setPrompt,
   deletePrompt,
+  getChatDraft,
   type Workspace,
 } from "./db.ts";
 import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
 import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
 import { createDevServerTestRunner, readKnownScripts, KNOWN_SCRIPT_NAMES } from "./devserver.ts";
+import { sendChatMessage, finalizeChatDraft, stopAllChatProcesses } from "./chat.ts";
 import {
   listSpecs,
   getSpecBoardDetail,
@@ -27,6 +29,7 @@ import {
   attemptMerge,
   redoIssue,
   acknowledgeStale,
+  createSpecFromDraft,
   startScheduler,
   createLiveOutputStore,
   type Ctx,
@@ -196,6 +199,46 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     return c.json({ ok: true, template: DEFAULT_TEMPLATES[role] });
   });
 
+  // 討論分頁：目前草稿的完整逐字稿，重整頁面用這個還原畫面。真正的對話
+  // 歷史活在 claude 那個 session 裡，這裡存的只是給人看的副本。
+  app.get("/api/workspaces/:name/chat", (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const draft = getChatDraft(db, handle.ctx.workspace.id);
+    return c.json({ transcript: draft.transcript });
+  });
+
+  app.post("/api/workspaces/:name/chat/messages", async (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const body = await c.req.json();
+    if (typeof body.text !== "string" || body.text.trim() === "") {
+      return c.json({ error: "text must be a non-empty string" }, 400);
+    }
+    try {
+      const result = await sendChatMessage(db, handle.ctx.workspace, body.text);
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // 定稿：把目前討論收斂成 spec，寫檔、commit、喚醒排程器。定稿按鈕就是
+  // 開跑按鈕（DESIGN.md「chat 產 spec」），沒有另外的 draft review 步驟。
+  app.post("/api/workspaces/:name/chat/finalize", async (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    try {
+      const { draft, sessionId } = await finalizeChatDraft(db, handle.ctx.workspace);
+      const slug = createSpecFromDraft(handle.ctx, draft, sessionId);
+      handle.scheduler.wake();
+      broadcast(c.req.param("name"));
+      return c.json({ slug });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   // 設定頁上半部：專案路徑、spec 資料夾、限制，加上兩個純資訊性的檢查項
   // （DESIGN.md「不為詞彙表與規範文件開設定欄位」-- 只看有沒有，不是必填、
   // 也不擋執行），以及從專案 package.json 實際讀到的 loom:* 指令。
@@ -323,6 +366,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     app,
     stop() {
       for (const handle of handles.values()) handle.scheduler.stop();
+      stopAllChatProcesses();
     },
   };
 }

@@ -108,6 +108,28 @@ test("decideOutcome: overageStatus 'rejected' on an allowed run is NOT usage exh
   assert.equal(result?.usage?.costUsd, 0.01);
 });
 
+test("decideOutcome: status 'allowed_warning' (near the 5-hour window threshold) is NOT usage exhaustion", () => {
+  // 實測樣本：帳號當時用到 five_hour 視窗 93%，呼叫本身完全成功
+  // （is_error:false, subtype:success），只是多一個「快到門檻了」的提醒。
+  const events: StreamEvent[] = [
+    {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed_warning",
+        resetsAt: 1785313200,
+        rateLimitType: "five_hour",
+        utilization: 0.93,
+        isUsingOverage: false,
+        surpassedThreshold: 0.9,
+      },
+    } as StreamEvent,
+    OK_RESULT,
+  ];
+
+  const result = decideOutcome(events, { type: "object" });
+  assert.equal(result?.outcome, "ok", "allowed_warning is still an allowed call, not exhaustion");
+});
+
 test("decideOutcome: a genuinely non-allowed status is usage exhaustion", () => {
   const events: StreamEvent[] = [
     { type: "rate_limit_event", rate_limit_info: { status: "rejected" } } as StreamEvent,
@@ -126,6 +148,15 @@ test("decideOutcome: schema requested but no structured_output is infra_fail, no
 
 test("decideOutcome: no result event at all returns null so the caller can fall back to string matching", () => {
   assert.equal(decideOutcome([{ type: "system" } as StreamEvent], undefined), null);
+});
+
+test("decideOutcome: no schema requested surfaces the plain-text reply via `text` (chat's ordinary turns have no --json-schema)", () => {
+  const plainReply: StreamEvent = { ...(OK_RESULT as Record<string, unknown>), result: "hello back" } as StreamEvent;
+  delete (plainReply as Record<string, unknown>).structured_output;
+  const result = decideOutcome([plainReply], undefined);
+  assert.equal(result?.outcome, "ok");
+  assert.equal(result?.text, "hello back");
+  assert.equal(result?.structuredOutput, undefined);
 });
 
 test("runClaude: nonexistent binary is reported as infra_fail via child 'error' event, not a crash", async () => {

@@ -53,10 +53,11 @@ export const ROLE_SCHEMAS = {
   chat: null,
 } as const;
 
-// reviewer 唯讀：不給 Write/Edit/Bash，結構上就做不到修改東西，比只靠
-// prompt 交代更硬。coder 不設限（未帶 tools 用預設全套），它本來就該能
-// 讀寫跑指令。
-const REVIEWER_TOOLS = ["Read", "Glob", "Grep"];
+// 唯讀白名單：不給 Write/Edit/Bash，結構上就做不到修改東西，比只靠 prompt
+// 交代更硬（`--disallowedTools Write Edit` 擋不住 Bash 用 heredoc 寫檔，實測
+// 見 DESIGN.md「chat 產 spec」）。reviewer 與 chat 共用同一份 -- coder 不
+// 設限（未帶 tools 用預設全套），它本來就該能讀寫跑指令。
+export const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -139,7 +140,7 @@ export function createClaudeAgentRunner(options: ClaudeAgentOptions = {}): Agent
       cwd: req.worktreePath,
       prompt,
       jsonSchema: ROLE_SCHEMAS[req.role] ?? undefined,
-      tools: req.role === "coder" ? undefined : REVIEWER_TOOLS,
+      tools: req.role === "coder" ? undefined : READ_ONLY_TOOLS,
       model: options.model,
       timeoutMs,
       onEvent: req.onEvent,

@@ -58,6 +58,9 @@ export interface ClaudeSpawnOptions {
   model?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** 接續既有 session（`claude --resume`），用於 chat 定稿：不重講一次前情
+   * 就能疊加一次 --json-schema 呼叫拿結構化輸出（實測見 claude-stream.test.ts）。 */
+  resumeSessionId?: string;
   /**
    * 有給的話改叫 `--output-format stream-json` 逐行解析，每個 assistant
    * 內容區塊（說話或呼叫工具）即時回呼一次；沒給就維持 `--output-format
@@ -75,6 +78,9 @@ export interface ClaudeRunResult {
   sessionId?: string;
   usage?: RunUsage;
   structuredOutput?: unknown;
+  /** result 事件的純文字回覆。沒帶 --json-schema 的呼叫（chat 的一般對話輪）
+   * 靠這個拿回覆內容；帶了 schema 的呼叫該用 structuredOutput，不必理會這欄。 */
+  text?: string;
   /** infra_fail / usage_exhausted 時附上，方便看板顯示與除錯，不是穩定介面。 */
   errorDetail?: string;
 }
@@ -108,12 +114,24 @@ const USAGE_EXHAUSTION_MARKERS = [
 // stream-json 就會讓整個 orchestrator 在第一次呼叫就停住（DESIGN.md「誤判成
 // 用量用盡會讓整個 orchestrator 白白停住」講的正是這個）。
 //
+// 第二個實測樣本（帳號當時用到 five_hour 視窗 93%）：
+//
+//   { status: "allowed_warning", rateLimitType: "five_hour", resetsAt: ...,
+//     utilization: 0.93, isUsingOverage: false, surpassedThreshold: 0.9 }
+//
+// 呼叫本身 is_error:false、subtype:success，跟真的 "allowed" 沒有兩樣，只是
+// 多一個「快到門檻了」的提醒。原本只認字面 "allowed" 一種值的話，這裡會被
+// 誤判成用量用盡 -- 跟 overageStatus:"rejected" 曾經犯過的是同一種錯：把
+// 「還在可用範圍內的附加資訊」當成了「不可用」。
+//
 // 真的撞到上限時 status 會是什麼值還沒有樣本，所以維持保守預設：判不出來就
 // 讓它走 infra_fail（重試三次），不是 usage_exhausted（整條停住）。
+const ALLOWED_RATE_LIMIT_STATUSES = ["allowed", "allowed_warning"];
+
 function classifyRateLimitEvents(events: StreamEvent[]): boolean {
   return events.some((e) => {
     if (e.type !== "rate_limit_event") return false;
-    return (e as RateLimitEvent).rate_limit_info.status !== "allowed";
+    return !ALLOWED_RATE_LIMIT_STATUSES.includes((e as RateLimitEvent).rate_limit_info.status);
   });
 }
 
@@ -153,6 +171,7 @@ export function decideOutcome(events: StreamEvent[], jsonSchema: object | undefi
     outcome: "ok",
     sessionId: result.session_id,
     structuredOutput: result.structured_output,
+    text: result.result,
     usage: {
       durationMs: result.duration_ms,
       inputTokens: result.usage.input_tokens,
@@ -189,18 +208,24 @@ function decideUnparseableOutcome(
   };
 }
 
+// 隔離 flag 的基底集合，跟 chat.ts 的長駐雙向 process 共用 -- 兩邊都得
+// 隔離個人環境（DESIGN.md「隔離個人環境」），只有一份維護，不是兩份可能
+// 漂移的複本。
+export const BASE_ISOLATION_FLAGS = [
+  "--setting-sources",
+  "project,local",
+  "--strict-mcp-config",
+  "--disable-slash-commands",
+  "--permission-mode",
+  "bypassPermissions",
+];
+
 function isolationArgs(opts: ClaudeSpawnOptions): string[] {
-  const args = [
-    "--setting-sources",
-    "project,local",
-    "--strict-mcp-config",
-    "--disable-slash-commands",
-    "--permission-mode",
-    "bypassPermissions",
-  ];
+  const args = [...BASE_ISOLATION_FLAGS];
   if (opts.model) args.push("--model", opts.model);
   if (opts.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
   if (opts.tools) args.push("--tools", opts.tools.join(","));
+  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
   return args;
 }
 
