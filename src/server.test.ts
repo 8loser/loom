@@ -283,6 +283,8 @@ test("GET / serves the board page, and every endpoint that page calls is a real 
       "/api/workspaces/nope/specs/s/merge",
       "/api/workspaces/nope/specs/s/issues/01/redo",
       "/api/workspaces/nope/specs/s/issues/01/acknowledge-stale",
+      "/api/workspaces/nope/chat/messages",
+      "/api/workspaces/nope/chat/finalize",
     ];
     for (const path of paths) {
       const res = await fetch(`${base}${path}`, { method: "POST" });
@@ -290,7 +292,7 @@ test("GET / serves the board page, and every endpoint that page calls is a real 
       assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);
     }
 
-    for (const path of ["/api/workspaces/nope/board", "/api/workspaces/nope/settings", "/api/workspaces/nope/prompts"]) {
+    for (const path of ["/api/workspaces/nope/board", "/api/workspaces/nope/settings", "/api/workspaces/nope/prompts", "/api/workspaces/nope/chat"]) {
       const res = await fetch(`${base}${path}`);
       assert.equal(res.status, 404, path);
       assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);

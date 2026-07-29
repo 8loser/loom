@@ -17,11 +17,14 @@ import {
   clearIssueState,
   setVerifiedMainSha,
   getVerifiedMainSha,
+  setSpecChatSessionId,
+  deleteChatDraft,
   getSpecRunAggregate,
   getTodayRunAggregate,
   getLatestRun,
   getSpecReviewComments,
 } from "./db.ts";
+import type { SpecDraft } from "./chat.ts";
 import {
   readIssueFrontMatter,
   writeIssueFrontMatter,
@@ -829,6 +832,51 @@ export function dropIssueAndDownstream(ctx: Ctx, spec: string, issueId: string):
       writeIssueStatus(ctx, spec, issue, "dropped");
     }
   }
+}
+
+function slugify(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "spec";
+}
+
+const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * chat 定稿：把 LLM 產的 draft 寫成 spec.md + issues/*.md，commit 一次
+ * （DESIGN.md「狀態寫入」規則 4 -- 新 spec 進場也是一次狀態轉移），把這次
+ * 討論的 session_id 記到 spec_state 讓「回原對話改 spec」找得到，清掉
+ * chat_sessions 的草稿列。issue 的 blocked_by 在 draft 裡是引用其他 issue
+ * 的 title（LLM 產出時還不知道最終編號），這裡按順序編號後才轉成 id。
+ */
+export function createSpecFromDraft(ctx: Ctx, draft: SpecDraft, chatSessionId: string): string {
+  const slug = SLUG_RE.test(draft.slug) ? draft.slug : slugify(draft.slug);
+  const dir = specDir(ctx, slug);
+  if (existsSync(dir)) throw new Error(`spec already exists: ${slug}`);
+
+  const issuesDir = join(dir, "issues");
+  mkdirSync(issuesDir, { recursive: true });
+  writeFileSync(join(dir, "spec.md"), writeSpecFrontMatter(draft.specMd, { merged: false, blockedReason: null }));
+
+  const titleToId = new Map(draft.issues.map((issue, i) => [issue.title, String(i + 1).padStart(2, "0")]));
+  draft.issues.forEach((issue, i) => {
+    const id = String(i + 1).padStart(2, "0");
+    const file = `${id}-${slugify(issue.title)}.md`;
+    const body = `# ${id} ${slugify(issue.title)}\n\n${issue.body}\n`;
+    const blockedBy = issue.blockedBy.map((title) => titleToId.get(title)).filter((v): v is string => v !== undefined);
+    writeFileSync(
+      join(issuesDir, file),
+      writeIssueFrontMatter(body, { status: issue.needsHuman ? "human" : "ready", e2e: issue.e2e, blockedBy }),
+    );
+  });
+
+  commitStateChange(ctx.workspace.repoPath, ctx.workspace.specsDir, `${slug} created from chat`);
+  setSpecChatSessionId(ctx.db, ctx.workspace.id, slug, chatSessionId);
+  deleteChatDraft(ctx.db, ctx.workspace.id);
+  return slug;
 }
 
 /** 掃 specsDir 底下有 spec.md 的目錄。不驗證內容格式，畸形的交給呼叫端處理。 */

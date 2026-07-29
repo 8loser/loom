@@ -28,6 +28,7 @@ import {
   getSpecBoardDetail,
   getWorkspaceSummary,
   createLiveOutputStore,
+  createSpecFromDraft,
   type Ctx,
   type AgentRunner,
   type AgentRequest,
@@ -35,6 +36,7 @@ import {
   type TestRunner,
 } from "./orchestrator.ts";
 import type { LiveEvent } from "./claude.ts";
+import type { SpecDraft } from "./chat.ts";
 
 const scratchRoot = join(process.env.CLAUDE_JOB_DIR ?? ".", "tmp", "orchestrator-test");
 mkdirSync(scratchRoot, { recursive: true });
@@ -801,4 +803,60 @@ test("getWorkspaceSummary: recentCostUsd sums today's runs, runningCount reflect
   const running = getWorkspaceSummary(ctx);
   assert.ok(running.recentCostUsd > 0);
   assert.equal(running.runningCount, 1);
+});
+
+test("createSpecFromDraft: writes spec.md + numbered issues, resolves blocked_by from title to id, commits once, and records the chat session", () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("existing-spec", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+
+  const draft: SpecDraft = {
+    slug: "week-strip-ipad-portrait",
+    specMd: "# week-strip-ipad-portrait\n\nproblem statement.\n",
+    issues: [
+      { title: "extract-timeline-range-hook", body: "do the extraction.", blockedBy: [], e2e: false, needsHuman: false },
+      {
+        title: "fluid-week-strip-columns",
+        body: "use flexible columns.",
+        blockedBy: ["extract-timeline-range-hook"],
+        e2e: false,
+        needsHuman: false,
+      },
+      {
+        title: "confirm-ipad-breakpoints-with-clinic",
+        body: "needs a human call.",
+        blockedBy: [],
+        e2e: false,
+        needsHuman: true,
+      },
+    ],
+  };
+
+  const slug = createSpecFromDraft(ctx, draft, "session-abc");
+  assert.equal(slug, "week-strip-ipad-portrait");
+
+  const issues = loadIssues(ctx, slug);
+  assert.deepEqual(issues.map((i) => i.id), ["01", "02", "03"]);
+  assert.equal(issues[0].status, "ready");
+  assert.deepEqual(issues[1].blockedBy, ["01"]);
+  assert.equal(issues[2].status, "human");
+
+  // 一次落地只該有一個 commit（spec.md + 三個 issue 檔一起進去）。
+  const log = execFileSync("git", ["log", "--oneline", "-n", "2"], { cwd: workspace.repoPath }).toString();
+  assert.match(log.split("\n")[0], /week-strip-ipad-portrait created from chat/);
+
+  const row = db
+    .prepare("SELECT chat_session_id FROM spec_state WHERE workspace_id = ? AND spec = ?")
+    .get(workspace.id, slug) as { chat_session_id: string } | undefined;
+  assert.equal(row?.chat_session_id, "session-abc");
+});
+
+test("createSpecFromDraft: refuses to overwrite a spec that already exists", () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("existing-spec", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const draft: SpecDraft = {
+    slug: "existing-spec",
+    specMd: "# existing-spec\n",
+    issues: [{ title: "a", body: "b", blockedBy: [], e2e: false, needsHuman: false }],
+  };
+  assert.throws(() => createSpecFromDraft(ctx, draft, "session-abc"), /already exists/);
 });

@@ -61,7 +61,7 @@
      grid 會讓下面的 pane 遞補到 auto 行，整個版面縮成內容高度、留一大塊空白。 */
   .app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
   .app > * { flex: none; }
-  .app > .main, .app > .sheet { flex: 1; min-height: 0; }
+  .app > .main, .app > .sheet, .app > .chatpane { flex: 1; min-height: 0; }
 
   /* ---------- top bar ---------- */
   .topbar {
@@ -313,6 +313,29 @@
   .pfoot .spacer { margin-left: auto; }
   .pfoot .saved { font-size: 11.5px; color: var(--ok); }
 
+  /* ---------- 討論 ---------- */
+  .chatpane { display: flex; flex-direction: column; min-height: 0; }
+  .thread { overflow: auto; padding: 20px 24px; flex: 1; min-height: 0; }
+  .turn { max-width: 62ch; margin: 0 0 20px; }
+  .turn .who {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px;
+  }
+  .turn.me .who { color: var(--accent); }
+  .turn p { margin: 0 0 9px; white-space: pre-wrap; }
+  .composer {
+    border-top: 1px solid var(--border); padding: 12px 24px 16px; background: var(--surface);
+    display: flex; flex-direction: column; gap: 8px; flex: none;
+  }
+  #chat-input {
+    display: block; width: 100%; box-sizing: border-box; resize: vertical; min-height: 52px;
+    border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg); color: var(--text);
+    padding: 9px 11px; font: inherit; font-size: 13px;
+  }
+  .cfoot { display: flex; align-items: center; gap: 10px; }
+  .cfoot .note { font-size: 11.5px; color: var(--muted); }
+  .cfoot .spacer { margin-left: auto; }
+
   #picker, #newws {
     border: 1px solid var(--border-strong); border-radius: 4px; padding: 0;
     background: var(--surface); color: var(--text); width: min(560px, 90vw);
@@ -339,6 +362,18 @@
   <div class="main" id="pane-board">
     <div class="board"><div class="grid" id="grid"></div></div>
     <aside class="detail" id="detail"></aside>
+  </div>
+  <div class="chatpane" id="pane-chat" hidden>
+    <div class="thread" id="chat-thread"></div>
+    <div class="composer">
+      <textarea id="chat-input" placeholder="說說想改什麼、或想加什麼功能…" spellcheck="false"></textarea>
+      <div class="cfoot">
+        <span class="note" id="chat-note"></span>
+        <span class="spacer"></span>
+        <button class="btn" id="chat-send">送出</button>
+        <button class="btn primary" id="chat-finalize" disabled>建立並開始執行</button>
+      </div>
+    </div>
   </div>
   <div class="sheet" id="pane-settings" hidden></div>
   <!-- 放在 .app 裡：放外面時 body 會比 100dvh 高出這一條，永遠有一根直捲軸。 -->
@@ -414,9 +449,11 @@ let currentWs = null;
 let board = null; // 目前 workspace 最近一次抓到的 board 回應
 let selection = null; // {type:'spec', spec} | {type:'issue', spec, issue} | null
 let liveTimer = null;
-let tab = "board"; // 'board' | 'settings'（討論分頁還沒接，見 DESIGN.md「chat 產 spec」）
+let tab = "board"; // 'board' | 'chat' | 'settings'
 let settings = null; // 設定分頁最近一次抓到的 /settings 與 /prompts
 let promptRole = "coder"; // 設定頁目前編輯中的角色
+let chat = null; // 討論分頁最近一次抓到的逐字稿 {transcript}
+let chatBusy = false; // 送出中或定稿中，鎖住輸入避免重複送出
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -446,11 +483,12 @@ function findIssue(spec, issue) { return findSpec(spec)?.issues.find((i) => i.id
 function render() {
   renderTopbar();
   $("pane-board").hidden = tab !== "board";
+  $("pane-chat").hidden = tab !== "chat";
   $("pane-settings").hidden = tab !== "settings";
   $("attention").hidden = tab !== "board";
-  // 設定頁自己管重繪。這裡不碰它，否則 SSE 事件或 10 秒的保底 poll 會在
-  // 使用者編輯提示詞打到一半時把 textarea 整個換掉。
-  if (tab === "settings") return;
+  // 設定頁與討論頁自己管重繪。這裡不碰它們，否則 SSE 事件或 10 秒的保底
+  // poll 會在使用者編輯提示詞、或打字打到一半時把畫面整個換掉。
+  if (tab === "settings" || tab === "chat") return;
   renderAttention();
   renderGrid();
   renderDetail();
@@ -474,6 +512,7 @@ function renderTopbar() {
     <button class="btn" id="open-newws" title="新增 workspace">+</button>
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="board" aria-selected="${tab === "board"}">看板</button>
+      <button class="tab" role="tab" data-tab="chat" aria-selected="${tab === "chat"}">討論</button>
       <button class="tab" role="tab" data-tab="settings" aria-selected="${tab === "settings"}">設定</button>
     </div>
     <div class="meters">
@@ -483,7 +522,7 @@ function renderTopbar() {
       <span class="meter">${board.paused ? "" : '<span class="pulse" aria-hidden="true"></span>'}<span class="v">${board.paused ? "已暫停" : "執行中"}</span></span>
       <button class="btn" id="toggle-pause">${board.paused ? "繼續" : "暫停"}</button>
     </div>`;
-  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; settings = null; refresh(); });
+  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; settings = null; chat = null; refresh(); });
   $("open-newws").addEventListener("click", openNewWorkspace);
   for (const el of topbar.querySelectorAll(".tab[data-tab]")) {
     el.addEventListener("click", () => switchTab(el.dataset.tab));
@@ -508,8 +547,18 @@ async function switchTab(next) {
       return;
     }
   }
+  if (tab === "chat" && !chat) {
+    try {
+      chat = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/chat`);
+      say("");
+    } catch (err) {
+      say(`讀討論失敗：${err.message}`);
+      return;
+    }
+  }
   render();
   if (tab === "settings") renderSettings();
+  if (tab === "chat") renderChat();
 }
 
 function field(label, value, cls = "") {
@@ -601,6 +650,74 @@ function savePrompt(role) {
     apply: (entry) => Object.assign(entry, { template, isDefault: false }),
   });
 }
+
+function renderChat() {
+  const thread = $("chat-thread");
+  const turns = chat?.transcript ?? [];
+  thread.innerHTML = turns.length
+    ? turns.map((t) => `
+        <article class="turn ${t.role === "user" ? "me" : ""}">
+          <div class="who">${t.role === "user" ? "我" : "loom"}</div>
+          <p>${esc(t.text)}</p>
+        </article>`).join("")
+    : '<p class="note-run">說說想改什麼、或想加什麼功能，開始討論。</p>';
+  thread.scrollTop = thread.scrollHeight;
+
+  $("chat-input").disabled = chatBusy;
+  $("chat-send").disabled = chatBusy;
+  $("chat-finalize").disabled = chatBusy || turns.length === 0;
+  $("chat-note").textContent = chatBusy ? "處理中…" : "";
+}
+
+async function sendChatMsg() {
+  const input = $("chat-input");
+  const text = input.value.trim();
+  if (!text || chatBusy) return;
+  chatBusy = true;
+  renderChat();
+  try {
+    const result = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/chat/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    chat = { transcript: result.transcript };
+    input.value = "";
+    say("");
+  } catch (err) {
+    say(`討論失敗：${err.message}`);
+  }
+  chatBusy = false;
+  renderChat();
+}
+
+// 定稿按鈕就是開跑按鈕（DESIGN.md「chat 產 spec」）：沒有額外的草稿預覽
+// 步驟，按下去直接寫檔、commit、開始跑，成功後切去看板看新 spec。
+async function finalizeChat() {
+  if (chatBusy) return;
+  chatBusy = true;
+  renderChat();
+  try {
+    const result = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/chat/finalize`, { method: "POST" });
+    chat = null;
+    chatBusy = false;
+    tab = "board";
+    selection = { type: "spec", spec: result.slug };
+    say("");
+    await refresh(); // 看板要立刻看到剛建立的 spec，不能只靠 SSE 事件的來回時間差
+    return;
+  } catch (err) {
+    say(`定稿失敗：${err.message}`);
+  }
+  chatBusy = false;
+  renderChat();
+}
+
+$("chat-send").addEventListener("click", sendChatMsg);
+$("chat-finalize").addEventListener("click", finalizeChat);
+$("chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendChatMsg(); }
+});
 
 function resetPrompt(role) {
   return updatePrompt(role, {

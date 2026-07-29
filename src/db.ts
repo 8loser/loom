@@ -90,12 +90,29 @@ CREATE TABLE IF NOT EXISTS issue_state (
 -- 現在的 HEAD 比對，判斷 mergeable 等待期間 main 有沒有被別的 spec
 -- 塞進真正的 code（不只是 loom 自己的狀態 commit），有的話要求重驗
 -- （見 DESIGN.md「多個 spec 平行時的三個交互點」）。
+-- chat_session_id：這個 spec 是從「討論」分頁定稿產生時，那次對話的
+-- claude session id（見 chat_sessions）。定稿那一刻從 chat_sessions 搬過來，
+-- 讓「開跑後只能改還沒開始的 issue，修改走 --resume 回原對話」找得到要
+-- resume 哪個 session；手動匯入的 spec 這欄是 NULL。
 CREATE TABLE IF NOT EXISTS spec_state (
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
   spec TEXT NOT NULL,
   verified_main_sha TEXT,
+  chat_session_id TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, spec)
+);
+
+-- 「討論」分頁定稿前的草稿：一個 workspace 同時只有一份進行中的討論
+-- （mockup 上討論分頁只有一個 thread，見 DESIGN.md「chat 產 spec」）。
+-- transcript_json 只給重整頁面後還原畫面用，不是狀態機的一部分 --
+-- 真正的對話歷史活在 claude 那個 session 裡，session_id 才是接續對話的
+-- 依據。定稿成功後這一列整個刪掉（見 finalizeChatDraft）。
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id),
+  session_id TEXT,
+  transcript_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL
 );
 
 -- 每個角色一份可編輯的提示詞，per-workspace（見 DESIGN.md「提示詞在 web UI
@@ -397,6 +414,55 @@ export function getVerifiedMainSha(
     )
     .get(workspaceId, spec) as { verified_main_sha: string | null } | undefined;
   return row?.verified_main_sha ?? null;
+}
+
+/** 定稿當下把討論的 session_id 記到這個 spec 底下，見 spec_state.chat_session_id 的說明。 */
+export function setSpecChatSessionId(
+  db: Db,
+  workspaceId: number,
+  spec: string,
+  sessionId: string,
+): void {
+  db.prepare(
+    `INSERT INTO spec_state (workspace_id, spec, chat_session_id, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (workspace_id, spec)
+     DO UPDATE SET chat_session_id = excluded.chat_session_id, updated_at = excluded.updated_at`,
+  ).run(workspaceId, spec, sessionId, Date.now());
+}
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+  at: number;
+}
+
+export interface ChatDraft {
+  sessionId: string | null;
+  transcript: ChatTurn[];
+}
+
+/** 「討論」分頁草稿的目前狀態，沒開始過討論就回傳空 transcript。 */
+export function getChatDraft(db: Db, workspaceId: number): ChatDraft {
+  const row = db
+    .prepare("SELECT session_id, transcript_json FROM chat_sessions WHERE workspace_id = ?")
+    .get(workspaceId) as { session_id: string | null; transcript_json: string } | undefined;
+  if (!row) return { sessionId: null, transcript: [] };
+  return { sessionId: row.session_id, transcript: JSON.parse(row.transcript_json) };
+}
+
+export function saveChatDraft(db: Db, workspaceId: number, draft: ChatDraft): void {
+  db.prepare(
+    `INSERT INTO chat_sessions (workspace_id, session_id, transcript_json, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (workspace_id)
+     DO UPDATE SET session_id = excluded.session_id, transcript_json = excluded.transcript_json, updated_at = excluded.updated_at`,
+  ).run(workspaceId, draft.sessionId, JSON.stringify(draft.transcript), Date.now());
+}
+
+/** 定稿成功後清掉草稿列 -- session_id 已經搬進 spec_state，這裡不需要再留一份。 */
+export function deleteChatDraft(db: Db, workspaceId: number): void {
+  db.prepare("DELETE FROM chat_sessions WHERE workspace_id = ?").run(workspaceId);
 }
 
 export interface SpecRunAggregate {
