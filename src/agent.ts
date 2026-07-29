@@ -70,7 +70,8 @@ function readOr(path: string | undefined, fallback = ""): string {
   }
 }
 
-function varsFor(req: AgentRequest): Record<string, string | undefined> {
+/** 模板變數的唯一來源。prompts.test.ts 用它檢查設定頁宣告的變數都填得出值。 */
+export function templateVarsFor(req: AgentRequest): Record<string, string | undefined> {
   const specMdPath = join(req.workspace.repoPath, req.workspace.specsDir, req.spec, "spec.md");
   return {
     spec: req.spec,
@@ -80,7 +81,6 @@ function varsFor(req: AgentRequest): Record<string, string | undefined> {
     last_failure: req.lastFailure ?? "",
     base_sha: req.baseSha ?? "",
     attempt: String(req.attempt),
-    port: req.port === undefined ? "" : String(req.port),
     main_branch: req.workspace.mainBranch,
     repo_path: req.workspace.repoPath,
   };
@@ -133,7 +133,7 @@ export function createClaudeAgentRunner(options: ClaudeAgentOptions = {}): Agent
 
   return async (req: AgentRequest): Promise<AgentResponse> => {
     const template = templates(req.workspace.id, req.role);
-    const prompt = renderTemplate(template, varsFor(req));
+    const prompt = renderTemplate(template, templateVarsFor(req));
 
     const result = await runClaude({
       cwd: req.worktreePath,

@@ -19,7 +19,7 @@ import {
 } from "./db.ts";
 import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
 import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
-import { createDevServerTestRunner } from "./devserver.ts";
+import { createDevServerTestRunner, readKnownScripts, KNOWN_SCRIPT_NAMES } from "./devserver.ts";
 import {
   listSpecs,
   getSpecBoardDetail,
@@ -203,24 +203,16 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     const handle = handles.get(c.req.param("name"));
     if (!handle) return c.json({ error: "no such workspace" }, 404);
     const ws = handle.ctx.workspace;
-
-    let scripts: Record<string, string> = {};
-    try {
-      const pkg = JSON.parse(readFileSync(join(ws.repoPath, "package.json"), "utf8")) as {
-        scripts?: Record<string, string>;
-      };
-      scripts = Object.fromEntries(Object.entries(pkg.scripts ?? {}).filter(([k]) => k.startsWith("loom:")));
-    } catch {
-      scripts = {};
-    }
-
     return c.json({
       workspace: ws,
       checks: {
         claudeMd: existsSync(join(ws.repoPath, "CLAUDE.md")),
         contextMd: existsSync(join(ws.repoPath, "CONTEXT.md")),
       },
-      scripts,
+      // 認得哪些 script 是 devserver.ts 的事，這裡不重寫一份判斷 -- 否則
+      // 加一個階段（例如 typecheck）要改兩個地方，而設定頁少列一個沒人會發現。
+      scriptNames: KNOWN_SCRIPT_NAMES,
+      scripts: readKnownScripts(ws.repoPath),
     });
   });
 
@@ -291,7 +283,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
 
   // 只送「哪個 workspace 變了」，不送完整 board 內容 -- 前端收到後自己重打
   // GET board。這樣漏掉的事件（分頁背景、短暫斷線）不需要補發機制：下一個
-  //事件或重連時的第一次 fetch 自然會拿到最新狀態，不用維護一份事件歷史。
+  // 事件或重連時的第一次 fetch 自然會拿到最新狀態，不用維護一份事件歷史。
   app.get("/api/events", (c) => {
     return streamSSE(c, async (stream) => {
       const send: SseSend = (event, data) => {

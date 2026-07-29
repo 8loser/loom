@@ -384,7 +384,12 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
     assert.deepEqual(
       s.scripts,
       { "loom:dev": "vite --port $PORT", "loom:test": "vitest run" },
-      "only loom:* scripts, so the page doesn't list every script the project happens to have",
+      "only scripts loom knows about, not every script the project happens to have (build is ignored)",
+    );
+    assert.deepEqual(
+      s.scriptNames,
+      ["loom:setup", "loom:typecheck", "loom:dev", "loom:test", "loom:e2e"],
+      "the page renders this list, so it must come from devserver.ts rather than being hardcoded in ui.html",
     );
   } finally {
     await stopTestServer(loom, httpServer);

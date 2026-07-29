@@ -515,7 +515,9 @@ function renderSettings() {
   const ws = settings.workspace;
   const role = settings.roles.find((r) => r.role === promptRole) ?? settings.roles[0];
 
-  const scriptNames = ["loom:setup", "loom:dev", "loom:test", "loom:e2e"];
+  // 名稱清單由後端給（devserver.ts 的 SCRIPTS 是唯一來源），不在前端再寫一份。
+  // 固定列 loom:* 那幾個，加上專案實際定義的慣例退回名稱（typecheck/dev/test）。
+  const scriptNames = [...new Set([...settings.scriptNames, ...Object.keys(settings.scripts)])];
   const scriptRows = scriptNames
     .map((name) => field(name, settings.scripts[name] ?? "未定義", "ro"))
     .join("");
@@ -546,7 +548,7 @@ function renderSettings() {
     <div class="grp">
       <div class="grphd"><span class="label">限制</span></div>
       ${field("同時執行的 spec", String(ws.parallelLimit))}
-      ${field("連線埠範圍", `${ws.portRangeStart} – ${ws.portRangeEnd}`)}
+      ${field("連線埠範圍", `${ws.portRangeStart} - ${ws.portRangeEnd}`)}
     </div>
 
     <div class="grp">
@@ -570,39 +572,35 @@ function renderSettings() {
   $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
 }
 
-async function savePrompt(role) {
-  try {
-    await api(`/api/workspaces/${encodeURIComponent(currentWs)}/prompts/${encodeURIComponent(role)}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ template: $("ptext").value }),
-    });
-  } catch (err) {
-    say(`儲存提示詞失敗：${err.message}`);
-    return;
-  }
-  const entry = settings.roles.find((r) => r.role === role);
-  entry.template = $("ptext").value;
-  entry.isDefault = false;
-  renderSettings();
-  $("prompt-saved").textContent = "已儲存";
-}
-
-async function resetPrompt(role) {
+/** 存檔與還原是同一個形狀：打一次 API，用結果更新本地那筆，重繪，報一句。 */
+async function updatePrompt(role, { what, opts, apply }) {
   let result;
   try {
-    result = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/prompts/${encodeURIComponent(role)}`, {
-      method: "DELETE",
-    });
+    result = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/prompts/${encodeURIComponent(role)}`, opts);
   } catch (err) {
-    say(`還原預設失敗：${err.message}`);
+    say(`${what}失敗：${err.message}`);
     return;
   }
-  const entry = settings.roles.find((r) => r.role === role);
-  entry.template = result.template;
-  entry.isDefault = true;
+  apply(settings.roles.find((r) => r.role === role), result);
   renderSettings();
-  $("prompt-saved").textContent = "已還原成出廠預設";
+  $("prompt-saved").textContent = `已${what}`;
+}
+
+function savePrompt(role) {
+  const template = $("ptext").value;
+  return updatePrompt(role, {
+    what: "儲存",
+    opts: { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ template }) },
+    apply: (entry) => Object.assign(entry, { template, isDefault: false }),
+  });
+}
+
+function resetPrompt(role) {
+  return updatePrompt(role, {
+    what: "還原成出廠預設",
+    opts: { method: "DELETE" },
+    apply: (entry, result) => Object.assign(entry, { template: result.template, isDefault: true }),
+  });
 }
 
 function renderAttention() {
@@ -848,7 +846,7 @@ function renderDetail() {
     el.innerHTML = spec && issue ? renderIssueDetail(spec, issue) : '<p class="note-run">這個 issue 不見了。</p>';
   }
   // 每次 render 都整個重畫，捲動位置會跟著重設 -- 即時輸出永遠貼底顯示最新
-  // 一行,才有「看得到 agent 現在在幹嘛」的感覺,不用使用者自己往下拉。
+  // 一行，才有「看得到 agent 現在在幹嘛」的感覺，不用使用者自己往下拉。
   const stream = el.querySelector(".stream");
   if (stream) stream.scrollTop = stream.scrollHeight;
 }

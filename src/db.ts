@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
+import type { PromptRoleName } from "./prompts.ts";
+
 export type Db = DatabaseSync;
 
 export interface Workspace {
@@ -97,9 +99,11 @@ CREATE TABLE IF NOT EXISTS spec_state (
 );
 
 -- 每個角色一份可編輯的提示詞，per-workspace（見 DESIGN.md「提示詞在 web UI
--- 上可調」）。新增 workspace 時複製一份內建預設進來，沒有繼承或覆寫的兩層
--- 邏輯。不做版本歷史，編輯就是覆蓋 -- 看到 coder 一直踩同一個坑、改模板、
--- 讓當前重試立刻吃到新版，正是這個功能的用途。
+-- 上可調」）。只有被編輯過的角色才有一列：沒有那一列就讀 prompts.ts 的內建
+-- 預設，「還原預設」是把列刪掉。這樣「這份是不是還停在出廠預設」直接等於
+-- 「DB 裡有沒有這一列」，不需要拿內容跟預設做字串比對。
+-- 不做版本歷史，編輯就是覆蓋 -- 看到 coder 一直踩同一個坑、改模板、讓當前
+-- 重試立刻吃到新版，正是這個功能的用途。
 CREATE TABLE IF NOT EXISTS prompts (
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
   role TEXT NOT NULL,
@@ -166,8 +170,12 @@ function rowToWorkspace(row: Record<string, unknown>): Workspace {
   };
 }
 
-/** 只有 LLM 角色有提示詞，"test" 不是（見 DESIGN.md「沒有 tester agent」）。 */
-export type PromptRole = Exclude<Role, "test">;
+/**
+ * 只有 LLM 角色有提示詞，"test" 不是（見 DESIGN.md「沒有 tester agent」）。
+ * 別名 prompts.ts 的 PromptRoleName，那邊是從 DEFAULT_TEMPLATES 的 key 推導
+ * 出來的 -- 兩份手工維護的同義清單遲早會不一致。
+ */
+export type PromptRole = PromptRoleName;
 
 export function setPrompt(db: Db, workspaceId: number, role: PromptRole, template: string): void {
   db.prepare(

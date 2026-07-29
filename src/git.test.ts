@@ -10,6 +10,8 @@ import {
   commitStateChange,
   currentHead,
   diffRange,
+  diffForReview,
+  diffStatForReview,
   touchesPath,
   onlyTouchesSpecsDir,
   rebaseOntoMain,
@@ -321,4 +323,55 @@ test("diffShortStat: null when the worktree doesn't exist, insertions/deletions 
   writeFileSync(join(wt, "new.ts"), "export const x = 1;\n");
   commitAll(wt, "add a line and a file");
   assert.deepEqual(diffShortStat(wt, baseSha), { insertions: 2, deletions: 0 });
+});
+
+// review 的 diff 排除 lockfile、snapshot、build 產物：它們對「這個改動做對
+// 了嗎」零價值，卻很容易佔掉 diff 的九成。這不是為了省 token 而截斷，是這
+// 些檔案本來就不該被 review。
+test("diffForReview keeps real source changes and drops generated files", () => {
+  const repo = initRepo();
+  const wt = join(scratchRoot, "wt-" + Math.random().toString(36).slice(2));
+  ensureWorktree(repo, wt, "spec/review", "main");
+
+  writeFileSync(join(wt, "src.ts"), "export const real = 1;\n");
+  writeFileSync(join(wt, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {} }, null, 2));
+  writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 6.0\n");
+  mkdirSync(join(wt, "dist"), { recursive: true });
+  writeFileSync(join(wt, "dist", "bundle.js"), "console.log('built');\n");
+  mkdirSync(join(wt, "packages", "web", "dist"), { recursive: true });
+  writeFileSync(join(wt, "packages", "web", "dist", "nested.js"), "console.log('nested');\n");
+  writeFileSync(join(wt, "packages", "web", "real.ts"), "export const alsoReal = 2;\n");
+  mkdirSync(join(wt, "__snapshots__"), { recursive: true });
+  writeFileSync(join(wt, "__snapshots__", "a.snap"), "exports[`x`] = `y`;\n");
+  writeFileSync(join(wt, "types.generated.ts"), "export type Gen = 1;\n");
+  commitAll(wt, "work plus a pile of generated files");
+
+  const diff = diffForReview(wt, "main");
+  assert.match(diff, /export const real/, "the actual change must be there");
+  assert.match(diff, /alsoReal/, "source inside a monorepo package must survive too");
+  for (const noise of [
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "dist/bundle.js",
+    "packages/web/dist/nested.js",
+    "a.snap",
+    "types.generated.ts",
+  ]) {
+    assert.doesNotMatch(diff, new RegExp(noise.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${noise} should be excluded`);
+  }
+});
+
+test("diffStatForReview lists files and line counts, using the same exclusions", () => {
+  const repo = initRepo();
+  const wt = join(scratchRoot, "wt-" + Math.random().toString(36).slice(2));
+  ensureWorktree(repo, wt, "spec/reviewstat", "main");
+
+  writeFileSync(join(wt, "a.ts"), "export const a = 1;\n");
+  writeFileSync(join(wt, "package-lock.json"), "{}\n");
+  commitAll(wt, "one real file, one lockfile");
+
+  const stat = diffStatForReview(wt, "main");
+  assert.match(stat, /a\.ts/);
+  assert.doesNotMatch(stat, /package-lock/);
+  assert.doesNotMatch(stat, /export const a/, "a stat is file names and counts, not the content");
 });

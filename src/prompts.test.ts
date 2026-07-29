@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { templateVarsFor } from "./agent.ts";
+import type { AgentRequest } from "./orchestrator.ts";
 import {
   DEFAULT_TEMPLATES,
   TEMPLATE_VARIABLES,
@@ -25,21 +27,46 @@ test("renderTemplate: substituted content is not itself re-scanned for variables
   assert.equal(out, "<spec>see {port} below</spec>");
 });
 
-test("every declared variable actually appears in its role's template, and vice versa", () => {
+test("every variable a template uses is declared as available", () => {
   for (const role of Object.keys(DEFAULT_TEMPLATES) as PromptRoleName[]) {
-    const template = DEFAULT_TEMPLATES[role];
-    const used = new Set([...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
+    const used = new Set([...DEFAULT_TEMPLATES[role].matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
     const declared = new Set(TEMPLATE_VARIABLES[role]);
-
     for (const name of used) {
       assert.ok(
         declared.has(name),
         `${role} template uses {${name}} but the settings page won't list it as available`,
       );
     }
-    // 反向不強制相等：宣告了但預設模板沒用到的變數是刻意的（使用者編輯模板
-    // 時可以加進去），所以只檢查「用到的一定有宣告」。
-    assert.ok(declared.size > 0, `${role} must declare at least one variable`);
+  }
+});
+
+test("every declared variable can actually be filled with a value", () => {
+  // 反向：宣告了但 varsFor 填不出值的變數，在設定頁上是騙人的 -- 使用者照著
+  // 加進模板只會得到空字串。不強制預設模板都用到（使用者可以自己加進去），
+  // 但強制填得出來。
+  const request: AgentRequest = {
+    role: "coder",
+    workspace: {
+      id: 1,
+      name: "w",
+      repoPath: "/nowhere",
+      specsDir: "specs",
+      mainBranch: "main",
+      portRangeStart: 4300,
+      portRangeEnd: 4399,
+      parallelLimit: 2,
+    },
+    spec: "demo",
+    issue: "01",
+    worktreePath: "/nowhere",
+    attempt: 1,
+  };
+  const available = new Set(Object.keys(templateVarsFor(request)));
+
+  for (const role of Object.keys(DEFAULT_TEMPLATES) as PromptRoleName[]) {
+    for (const name of TEMPLATE_VARIABLES[role]) {
+      assert.ok(available.has(name), `${role} advertises {${name}} but agent.ts never supplies it`);
+    }
   }
 });
 

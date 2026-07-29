@@ -146,11 +146,15 @@ Principles worth applying to what this spec built:
 - **The interface is the test surface.** If the tests reach past the interface, the module is probably the wrong shape.
 - **One adapter means a hypothetical seam. Two adapters means a real one.** A seam introduced with nothing varying across it is speculative generality.
 
-Read the spec and all its issues, and the full diff of this spec's branch against the main branch, before commenting.
+The spec and the whole branch's diff against {main_branch} are below. Read the individual issue files under the spec's issues directory too before commenting.
 
 <spec>
 {spec_md}
-</spec>`;
+</spec>
+
+<diff>
+{diff}
+</diff>`;
 
 // chat 產 spec 還沒接上（見 DESIGN.md「chat 產 spec」），這份先存在，好讓
 // 設定頁四個角色都編輯得到、DB 結構不用之後再改。
@@ -184,11 +188,18 @@ export const DEFAULT_TEMPLATES = {
 
 export type PromptRoleName = keyof typeof DEFAULT_TEMPLATES;
 
-/** 設定頁顯示「可用變數」用，也是 renderTemplate 認得的全集。 */
+/**
+ * 設定頁顯示「可用變數」用，也是 renderTemplate 在那個角色會替換的全集。
+ *
+ * 這裡列的每一個都必須真的有值可填（見 agent.ts 的 varsFor），不是「模板
+ * 可能會用到的東西」的願望清單 -- 設定頁把它渲染成「可用變數」，列了但填不
+ * 進去的話，使用者照著加進模板只會得到空字串。prompts.test.ts 兩個方向都
+ * 檢查：模板用到的一定有宣告，宣告的一定填得出值。
+ */
 export const TEMPLATE_VARIABLES: Record<PromptRoleName, string[]> = {
-  coder: ["spec_md", "issue_md", "last_failure", "base_sha", "attempt", "port"],
-  issue_reviewer: ["spec_md", "issue_md", "diff", "base_sha", "attempt"],
-  spec_reviewer: ["spec_md", "spec", "main_branch"],
+  coder: ["spec", "spec_md", "issue_md", "last_failure", "base_sha", "attempt"],
+  issue_reviewer: ["spec", "spec_md", "issue_md", "diff", "base_sha", "attempt"],
+  spec_reviewer: ["spec", "spec_md", "diff", "main_branch"],
   chat: ["repo_path"],
 };
 

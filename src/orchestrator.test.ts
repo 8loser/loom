@@ -176,13 +176,17 @@ function makeStubAgent(opts: StubOptions = {}): { agent: AgentRunner; calls: Age
   return { agent, calls };
 }
 
-function makeStubTest(opts: { issuePass?: boolean; e2ePass?: boolean } = {}): TestRunner {
+function makeStubTest(
+  opts: { issuePass?: boolean; e2ePass?: boolean; issueFailure?: "domain" | "infra" } = {},
+): TestRunner {
   return {
     async runIssueTests() {
-      return { pass: opts.issuePass ?? true, output: "unit tests output" };
+      const pass = opts.issuePass ?? true;
+      return { pass, output: "unit tests output", failure: pass ? undefined : opts.issueFailure ?? "domain" };
     },
     async runSpecE2E() {
-      return { pass: opts.e2ePass ?? true, output: "e2e output" };
+      const pass = opts.e2ePass ?? true;
+      return { pass, output: "e2e output", failure: pass ? undefined : "domain" };
     },
   };
 }
@@ -214,6 +218,76 @@ test("happy path: single issue goes ready -> done, main gets exactly one state c
     runs.map((r) => `${r.role}:${r.outcome}`),
     ["coder:ok", "issue_reviewer:ok", "test:ok"],
   );
+});
+
+// DESIGN.md「失敗與重試」：「infra｜超時、setup 失敗｜直接 blocked」。混成
+// domain fail 的話，一次基礎設施故障會吃掉 coder 改 code 的三次機會，而且
+// 第三次會觸發 threeStageClean 把已經寫好的東西整個清掉重來。
+test("a test-stage infra failure blocks immediately without burning a domain retry", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { agent } = makeStubAgent();
+  const ctx: Ctx = {
+    db,
+    workspace,
+    agent,
+    test: makeStubTest({ issuePass: false, issueFailure: "infra" }),
+    worktreesRoot,
+  };
+
+  await runUntilIdle(ctx, "demo");
+
+  assert.equal(loadIssues(ctx, "demo")[0].status, "blocked");
+  const state = getIssueState(db, workspace.id, "demo", "01");
+  assert.equal(state.domainRetries, 0, "an infra failure must not cost the coder a chance to fix real code");
+
+  const testRuns = (db.prepare("SELECT outcome FROM runs WHERE role = 'test'").all() as { outcome: string }[]).map(
+    (r) => r.outcome,
+  );
+  assert.deepEqual(testRuns, ["infra_fail"], "recorded as infra, and tried exactly once");
+});
+
+test("a genuinely red test is a domain failure and does go back to the coder", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { agent } = makeStubAgent();
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ issuePass: false }), worktreesRoot };
+
+  await runUntilIdle(ctx, "demo");
+
+  assert.equal(loadIssues(ctx, "demo")[0].status, "blocked", "after exhausting the domain retries");
+  const testRuns = (db.prepare("SELECT outcome FROM runs WHERE role = 'test'").all() as { outcome: string }[]).map(
+    (r) => r.outcome,
+  );
+  assert.deepEqual(testRuns, ["domain_fail", "domain_fail", "domain_fail"], "three chances, unlike the infra path");
+});
+
+test("an issue flagged e2e:true asks the test runner for an e2e run", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const issuePath = join(workspace.repoPath, "specs", "demo", "issues", "01-issue.md");
+  writeFileSync(
+    issuePath,
+    writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "ready", e2e: true, blockedBy: [] }),
+  );
+  sh(workspace.repoPath, "git", ["commit", "-qam", "flag e2e"]);
+
+  const seen: (boolean | undefined)[] = [];
+  const ctx: Ctx = {
+    db,
+    workspace,
+    agent: makeStubAgent().agent,
+    test: {
+      async runIssueTests(runCtx) {
+        seen.push(runCtx.e2e);
+        return { pass: true, output: "" };
+      },
+      async runSpecE2E() {
+        return { pass: true, output: "" };
+      },
+    },
+    worktreesRoot,
+  };
+
+  await runUntilIdle(ctx, "demo");
+  assert.deepEqual(seen, [true], "the front matter flag has to reach the runner, or the e2e follow-up loop never converges");
 });
 
 test("domain fail retries twice in place, resets on third attempt, then passes", async () => {
@@ -401,6 +475,39 @@ test("verifySpec: e2e pass returns spec review comments without creating any iss
   assert.equal(result.e2ePass, true);
   assert.deepEqual(result.comments, ["consider deduping X"]);
   assert.equal(after, before, "spec review must not create issues on its own");
+});
+
+// spec review 找的是「不同 issue 各自引入了重複的抽象」「issue 03 建的東西被
+// issue 06 淘汰但沒刪」，那些只有攤開全貌才看得見。所以整份送，但 lockfile
+// 那類產生檔不送 -- 它們對這個判斷零價值卻能佔掉九成篇幅。
+test("spec review gets the whole branch diff, minus generated files", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const seen: (string | undefined)[] = [];
+  const agent: AgentRunner = async (req) => {
+    if (req.role === "coder") {
+      writeFileSync(join(req.worktreePath, "real.ts"), "export const x = 1;\n");
+      writeFileSync(join(req.worktreePath, "package-lock.json"), '{"lockfileVersion":3}\n');
+      return {
+        outcome: "ok",
+        usage: USAGE,
+        coder: { done: true, summary: "did it", filesChanged: ["real.ts", "package-lock.json"] },
+      };
+    }
+    if (req.role === "issue_reviewer") {
+      return { outcome: "ok", usage: USAGE, issueReview: { verdict: "pass", comments: [] } };
+    }
+    seen.push(req.diff);
+    return { outcome: "ok", usage: USAGE, specReview: { comments: [] } };
+  };
+
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  await runUntilIdle(ctx, "demo");
+  await verifySpec(ctx, "demo");
+
+  assert.equal(seen.length, 1, "spec_reviewer must have been called");
+  const diff = seen[0] ?? "";
+  assert.match(diff, /export const x = 1/, "the reviewer cannot run git itself -- it only has Read/Glob/Grep");
+  assert.doesNotMatch(diff, /lockfileVersion/, "generated files would drown the real change");
 });
 
 test("attemptMerge: happy path merges into main and cleans up the worktree", async () => {

@@ -413,6 +413,12 @@ spec review 不自動開工作，是因為架構層面的意見「要不要現�
 
 merge 按鈕已經是人的閘門，那些意見正好是按下去之前該讀的東西。
 
+**spec reviewer 的 diff 由 orchestrator 算好傳進 prompt，整份送。** reviewer 只有 `Read`/`Glob`/`Grep`（唯讀），自己跑不出 `git diff`。整份送是因為這個角色要找的正是「不同 issue 各自引入了重複的抽象」「issue 03 建的東西被 issue 06 淘汰但沒刪」，那些只有攤開全貌才看得見；截斷等於廢掉它存在的理由，而逐個 issue 的 diff 已經被 issue reviewer 看過了。
+
+成本上也不需要省：實測一個七個 commit 的分支約 130KB（約 38k token），在 200k context 裡佔不到五分之一，而一個 spec 只跑一次 spec review，同一個 spec 的 coder 與 issue reviewer 加起來是十幾次呼叫。
+
+**排除產生檔，不截斷。** `package-lock.json`、`*.snap`、`dist/` 那類對「這個改動做對了嗎」零價值，卻很容易佔掉 diff 的九成。清單寫死在 `git.ts`，不開設定欄位（理由同「不為詞彙表與規範文件開設定欄位」）。超過上限時才降級成檔案清單加行數，讓 reviewer 用它的 Read 自己挑要看的 -- 它的 cwd 就是完整 checkout。那條路徑是給大型改名散佈到幾百個檔案的極端情況，平常不會走到。
+
 ### spec review 意見的處理
 
 意見存 DB。點 lane 標頭時右側面板顯示 spec 層細節：整體 e2e 結果、review 意見清單、merge 按鈕。
@@ -438,7 +444,13 @@ merge 按鈕已經是人的閘門，那些意見正好是按下去之前該讀�
 
 **loom 只保證 `PORT` 唯一，其餘隔離由專案的 script 負責。** 多個 spec 平行跑測試時，共用資源不只 port -- 本機資料庫、共用檔案、固定的瀏覽器 profile 都會互相污染。要獨立資料庫就在 `loom:setup` 裡用 `$PORT` 衍生一個名稱。隔離責任放在最清楚狀況的地方，loom 不需要理解任何專案的測試環境。真的隔離不了的專案把平行上限設 1。
 
-**實作在 `src/devserver.ts`。** 「沒有可跑的東西」（沒有 `package.json`、沒有 test/e2e script）回傳 `pass: true`，但 output 明確寫出是哪一種，並存進 `runs.summary`。這是刻意的取捨：非 Node 專案、還沒加 `loom:*` script 的專案不該讓整條流水線卡死，但也不該讓人以為測試真的跑過。跟先前那個一律回 `pass: true` 且 output 為空字串的 stub 差別就在這裡。
+**實作在 `src/devserver.ts`。** 認得的 script 是 `loom:setup`、`loom:typecheck`、`loom:dev`、`loom:test`、`loom:e2e`，後四者找不到時退回慣例名稱（`typecheck`、`dev`、`test`）；沒有 `loom:setup` 時依 lockfile 決定安裝指令（`pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` / `package-lock.json`）。
+
+typecheck 跑在起 dev server 之前：編譯不過就沒必要花幾十秒起一個 server。
+
+**回傳值分三種，不是兩種。** `pass: true`；`failure: "domain"`（測試真的紅了，退回 implementing）；`failure: "infra"`（setup 失敗、任何一段超時、dev server 起不來，照失敗與重試的表格直接 blocked）。混成一種的話，一次基礎設施故障會吃掉 coder 改 code 的三次機會，而且第三次會觸發三階段清除把已經寫好的東西整個丟掉。
+
+**「沒有可跑的東西」（沒有 `package.json`、沒有 typecheck/test/e2e script）回傳 `pass: true`**，但 output 明確寫出是哪一種並存進 `runs.summary`。這是刻意的取捨：非 Node 專案、還沒加 `loom:*` script 的專案不該讓整條流水線卡死，但也不該讓人以為測試真的跑過。**worktree 目錄根本不存在則是拋錯**讓排程器停住 -- 那是環境壞了，不是「這個專案沒有測試」，兩者都走 `pass` 的話 issue 會在沒有程式碼可測的情況下變成 done。
 
 process 生命週期不交給 LLM 的理由：agent 超時被殺、自己崩掉、忘記 kill，server 就變孤兒佔住 port，症狀出現在下一個不相干的 spec 上，而且要手動 `lsof` 才找得到。orchestrator 是唯一確定知道「這一輪結束了」的角色。
 
@@ -486,11 +498,13 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 | 即時串流輸出 | `--output-format stream-json` |
 | chat 雙向串流 | `--input-format stream-json` |
 | 結構化回報 | `--json-schema`，state transition 不需要解析自然語言 |
-| 角色設定 | `--append-system-prompt` |
+| 角色設定 | 模板本身（見下） |
 | 不被權限卡住 | `--permission-mode bypassPermissions`，限 worktree 內 |
 | 隔離個人環境 | `--setting-sources project,local`、`--strict-mcp-config`、`--disable-slash-commands` |
 
 預設仍是 `--output-format json`（一次性拿完整結果）；`runClaude()` 另外加了一條 `--output-format stream-json` 逐行解析的路徑，只在呼叫端給了 `onEvent` 回呼時啟用（見「觀測」一節），沒給就完全走原本的路徑，兩者共用同一套 result 事件判讀邏輯。
+
+**角色設定沒有用 `--append-system-prompt`，整份模板走 stdin。** 提示詞改成可編輯之後，模板本身就包含角色說明與材料（`{spec_md}`、`{issue_md}` 那些變數），拆成「system prompt 那半可編輯、user prompt 那半程式組」會讓「一個角色一份模板」這件事變成兩個地方可以改。代價是那些指示落在 user turn 而不是 system prompt。
 
 **實測到一個非文件記載的行為，寫下來省得下次重踩：** `--output-format json` 的輸出形狀不是恆定的。不帶隔離 flag（`--setting-sources`/`--strict-mcp-config`/`--disable-slash-commands`/`--permission-mode`）時印整條 session 的事件陣列；production 實際用的 flag 組合下，只印最後那個 `result` 事件本身，不包陣列。`src/claude.ts` 兩種都處理（`Array.isArray` 判斷）。
 
@@ -556,7 +570,9 @@ SQLite 存兩類東西：
 
 ### 提示詞在 web UI 上可調
 
-四個角色各一份可編輯的模板，存 DB，per-workspace。新增 workspace 時複製一份內建預設，沒有繼承或覆寫的兩層邏輯。
+四個角色各一份可編輯的模板，存 DB，per-workspace。沒有繼承或覆寫的兩層邏輯。
+
+**只有被編輯過的角色才在 DB 裡有一列**，沒有那一列就讀內建預設。原本寫的是「新增 workspace 時複製一份內建預設」，實作時改成這樣：複製的話，內建預設之後有任何修正都不會傳播到已存在的 workspace，而那些 workspace 的擁有者根本沒動過那個角色的模板；而且「這份是不是還停在出廠預設」得拿內容跟預設做字串比對才知道，改成有沒有那一列就直接是答案。「還原預設」因此是刪掉那一列，不是複製一份預設寫回去。
 
 **預設內容就是內嵌自 mattpocock/skills 的攤平版本**（見「提示詞的來源」），整份可編輯。每個角色下方列出可用變數，設定頁附「還原預設」把它復原成內嵌的出廠版本。
 
@@ -583,6 +599,18 @@ seam 已定義在下面 spec 的 Testing Decisions，照那個做，不要自己
 **不做版本歷史，編輯就是覆蓋。** 因此同一個 issue 的第一次與第三次嘗試可能用不同版本的模板，`runs` 也不記錄用了哪一版。這是刻意的：看到 coder 一直踩同一個坑、改模板、讓當前重試立刻吃到新版，正是這個編輯功能的用途；凍結成「開工當下那一版」會把它變成「改了但這一輪不算」。代價是模板改壞了退不回上一版，只能重打或按還原預設回出廠版。
 
 **實作：** 出廠預設在 `src/prompts.ts`（四個角色的攤平版本，頂部保留 MIT 版權聲明）；per-workspace 的編輯版存在 `prompts` table。`agent.ts` 每次呼叫才讀 DB，不快取 -- 那是「當前重試立刻吃到新版」的實作方式。「還原預設」是把那一列刪掉，讀取時自然落回內建預設，不是複製一份預設寫回去，所以 `isDefault` 永遠等於「DB 裡沒有這一列」。變數替換認得的變數才換，不認得的原樣留著（打錯字時看得到 `{spce_md}` 留在 prompt 裡，比默默變成空字串好查）。
+
+### 新增 workspace 時的資料夾選取
+
+`repoPath` 要的是絕對路徑，但瀏覽器的資料夾選取（`webkitdirectory`、`showDirectoryPicker()`）基於安全設計一律不給絕對路徑。server 跟瀏覽器在同一台機器上，所以由 `GET /api/browse` 列目錄、前端拿它做選取器。只回目錄名稱與「含不含 `.git`」，不碰檔案內容。
+
+**不限制可瀏覽的根目錄。** `POST /api/workspaces` 本來就收任意絕對路徑並在那裡跑 agent，列目錄名是嚴格更小的權限；限制在 `homedir` 之下只會擋掉 repo 放 `/mnt`、`/srv` 的正常用法，而且手動輸入完全不受那個限制，等於只擋 UI 不擋 API。前提是 server 綁 `127.0.0.1` 且沒有 CORS header（跨站網頁送得出這個 GET 但讀不到回應）。要對外開的話，這條跟 `/api/workspaces` 都得先有驗證，而後者是更急的那個。
+
+### loom 自己的開發迴圈
+
+跟「dev server 生命週期」無關，那節講的是**專案的** server。`npm run dev` 用 Node 內建的 `--watch` 監看 `src/`，改動自動重啟。
+
+server 進程啟動時產生一個 `BOOT_ID`，SSE 的 `connected` 事件帶上它。server 重啟後瀏覽器的 `EventSource` 本來就會自動重連，前端發現 `bootId` 換了就 `location.reload()`。這樣改 `ui.html`（它是 `readFileSync` 讀的，不在 import 圖譜上，所以要 `--watch-path=src` 才追得到）不用手動重整，而且不需要另外接一套 hot reload 通道。一般手動重啟 server 也會觸發前端重載，那是對的行為：舊 UI 配新後端就是該重載。
 
 ### 匯入既有的 specs 資料夾
 

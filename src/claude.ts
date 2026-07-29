@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { RunUsage } from "./db.ts";
@@ -52,7 +52,6 @@ export interface LiveEvent {
 export interface ClaudeSpawnOptions {
   cwd: string;
   prompt: string;
-  appendSystemPrompt?: string;
   jsonSchema?: object;
   /** 覆寫預設的 --tools（見 createClaudeAgentRunner 裡每個角色給的清單）。 */
   tools?: string[];
@@ -62,10 +61,9 @@ export interface ClaudeSpawnOptions {
   /**
    * 有給的話改叫 `--output-format stream-json` 逐行解析，每個 assistant
    * 內容區塊（說話或呼叫工具）即時回呼一次；沒給就維持 `--output-format
-   * json` 一次性解析的既有路徑，行為完全不變。stream-json 的事件形狀是查
-   * 官方文件（code.claude.com/docs）確認的，不是像 json 格式那樣實測過 --
-   * 這裡的隔離 flag 組合有沒有跟文件描述的一致沒有驗證到，解析失敗時直接
-   * 略過該行，不影響 result 事件的判讀（見 runClaudeStreaming）。
+   * json` 一次性解析的既有路徑，行為完全不變。事件形狀跟這裡用的隔離 flag
+   * 組合都實測過（`claude-stream.test.ts`，預設 SKIP）。解析失敗的行直接
+   * 略過，不影響 result 事件的判讀（見 runClaudeStreaming）。
    */
   onEvent?: (event: LiveEvent) => void;
 }
@@ -86,12 +84,16 @@ export interface ClaudeRunResult {
 // （安全預設 -- 誤判成 infra 只是多重試三次，誤判成用量用盡會讓整個
 // orchestrator 白白停住）。這份清單沒有真的撞到用量上限驗證過，是保守的
 // 起點，之後遇到真實案例要回來補。
+//
+// 這裡刻意不放 out_of_credits：它是 rate_limit_event 的 overageDisabledReason
+// 值，而那個事件在每一次成功的 stream-json 呼叫裡都會出現（見下面
+// classifyRateLimitEvents 的實測樣本）。放進來的話，任何沒印出 result 事件
+// 就結束的 stream 都會因為 stdout 裡有這個字串而被判成用量用盡。
 const USAGE_EXHAUSTION_MARKERS = [
   "usage limit",
   "rate limit",
   "5-hour limit",
   "weekly limit",
-  "out_of_credits",
 ];
 
 // 只看 status。實測（claude 2.1.220，stream-json）一次完全成功的呼叫長這樣：
@@ -162,14 +164,28 @@ export function decideOutcome(events: StreamEvent[], jsonSchema: object | undefi
   };
 }
 
-function decideUnparseableOutcome(stdout: string, stderr: string, code: number | null): ClaudeRunResult {
-  const marker = [stdout, stderr].join("\n").toLowerCase();
+/**
+ * 沒有 result 事件可判的收尾路徑，靠字串比對猜是不是用量用盡。
+ *
+ * `matchStdout` 只有 buffered 路徑該開：那裡的 stdout 是一坨 parse 不了的
+ * 東西，本身就是錯誤訊息。stream-json 路徑的 stdout 是一堆合法的 JSON 事件
+ * 行，把它丟進字串比對等於拿 CLI 的正常輸出去猜錯誤 -- `rate_limit_event`
+ * 每次呼叫都會出現，比對清單只要有一個詞撞上就會誤判成用量用盡、讓整個
+ * orchestrator 停住。
+ */
+function decideUnparseableOutcome(
+  stdout: string,
+  stderr: string,
+  code: number | null,
+  matchStdout: boolean,
+): ClaudeRunResult {
+  const marker = (matchStdout ? [stdout, stderr].join("\n") : stderr).toLowerCase();
   if (USAGE_EXHAUSTION_MARKERS.some((m) => marker.includes(m))) {
     return { outcome: "usage_exhausted", errorDetail: stderr.slice(-2000) };
   }
   return {
     outcome: "infra_fail",
-    errorDetail: `exit ${code}, unparseable output: ${stderr.slice(-2000) || stdout.slice(-2000)}`,
+    errorDetail: `exit ${code}, no result event: ${stderr.slice(-2000) || stdout.slice(-2000)}`,
   };
 }
 
@@ -183,10 +199,62 @@ function isolationArgs(opts: ClaudeSpawnOptions): string[] {
     "bypassPermissions",
   ];
   if (opts.model) args.push("--model", opts.model);
-  if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
   if (opts.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
   if (opts.tools) args.push("--tools", opts.tools.join(","));
   return args;
+}
+
+/**
+ * 兩條路徑（一次性 JSON / 逐行 stream-json）共用的 spawn 外殼：逾時、
+ * spawn 失敗、只 settle 一次、把 prompt 寫進 stdin。差別只有 stdout 怎麼收
+ * （整份 buffer vs 逐行）與收完怎麼判，那兩件事由呼叫端給。
+ */
+interface SpawnHandlers {
+  onStdout(child: ChildProcessWithoutNullStreams): void;
+  onClose(code: number | null, stderr: string): ClaudeRunResult;
+}
+
+function spawnClaude(
+  opts: ClaudeSpawnOptions,
+  formatArgs: string[],
+  handlers: SpawnHandlers,
+): Promise<ClaudeRunResult> {
+  const args = ["-p", ...formatArgs, ...isolationArgs(opts)];
+
+  return new Promise((resolve) => {
+    const child = spawn("claude", args, {
+      cwd: opts.cwd,
+      env: opts.env ?? process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    let settled = false;
+    const finish = (result: ClaudeRunResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      resolve(result);
+    };
+
+    const timeout = opts.timeoutMs
+      ? setTimeout(() => {
+          child.kill("SIGKILL");
+          finish({ outcome: "infra_fail", errorDetail: "timed out" });
+        }, opts.timeoutMs)
+      : null;
+
+    handlers.onStdout(child);
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", (err) => finish({ outcome: "infra_fail", errorDetail: `spawn error: ${err.message}` }));
+    child.on("close", (code) => {
+      if (settled) return;
+      finish(handlers.onClose(code, stderr));
+    });
+
+    child.stdin.write(opts.prompt);
+    child.stdin.end();
+  });
 }
 
 /**
@@ -198,43 +266,10 @@ export function runClaude(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
 }
 
 function runClaudeBuffered(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
-  const args = ["-p", "--output-format", "json", ...isolationArgs(opts)];
-
-  return new Promise((resolve) => {
-    const child = spawn("claude", args, {
-      cwd: opts.cwd,
-      env: opts.env ?? process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const finish = (result: ClaudeRunResult) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-
-    const timeout = opts.timeoutMs
-      ? setTimeout(() => {
-          child.kill("SIGKILL");
-          finish({ outcome: "infra_fail", errorDetail: "timed out" });
-        }, opts.timeoutMs)
-      : null;
-
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-
-    child.on("error", (err) => {
-      if (timeout) clearTimeout(timeout);
-      finish({ outcome: "infra_fail", errorDetail: `spawn error: ${err.message}` });
-    });
-
-    child.on("close", (code) => {
-      if (timeout) clearTimeout(timeout);
-      if (settled) return;
-
+  let stdout = "";
+  return spawnClaude(opts, ["--output-format", "json"], {
+    onStdout: (child) => child.stdout.on("data", (chunk) => (stdout += chunk)),
+    onClose: (code, stderr) => {
       let events: StreamEvent[];
       try {
         const parsed: unknown = JSON.parse(stdout);
@@ -245,15 +280,10 @@ function runClaudeBuffered(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
         // 兩種都處理，不假設哪一種才是「正常」的。
         events = Array.isArray(parsed) ? parsed : [parsed as StreamEvent];
       } catch {
-        finish(decideUnparseableOutcome(stdout, stderr, code));
-        return;
+        return decideUnparseableOutcome(stdout, stderr, code, true);
       }
-
-      finish(decideOutcome(events, opts.jsonSchema) ?? { outcome: "infra_fail", errorDetail: "no result event in output" });
-    });
-
-    child.stdin.write(opts.prompt);
-    child.stdin.end();
+      return decideOutcome(events, opts.jsonSchema) ?? decideUnparseableOutcome(stdout, stderr, code, true);
+    },
   });
 }
 
@@ -267,7 +297,7 @@ function relPath(cwd: string, p: unknown): string {
 
 // ponytail: Edit/Write 只顯示檔名，不算真的 +/- 行數（要嘛自己實作 diff
 // 演算法要嘛每次多 spawn 一個 git diff，兩者都換不到「看得懂 agent 在幹嘛」
-//這個目標）；搜尋只顯示 pattern，不等 tool_result 回來算命中數。要補的話
+// 這個目標）；搜尋只顯示 pattern，不等 tool_result 回來算命中數。要補的話
 // 對照 mockup.html 的 .line.diff。
 function describeToolUse(cwd: string, name: string, input: Record<string, unknown>): { kind: LiveEventKind; text: string } {
   switch (name) {
@@ -311,61 +341,26 @@ function emitLiveEvents(cwd: string, message: unknown, onEvent: (event: LiveEven
 }
 
 function runClaudeStreaming(opts: ClaudeSpawnOptions, onEvent: (event: LiveEvent) => void): Promise<ClaudeRunResult> {
-  const args = ["-p", "--output-format", "stream-json", "--verbose", ...isolationArgs(opts)];
-
-  return new Promise((resolve) => {
-    const child = spawn("claude", args, {
-      cwd: opts.cwd,
-      env: opts.env ?? process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const events: StreamEvent[] = [];
-    let stdoutRaw = "";
-    let stderr = "";
-    let settled = false;
-    const finish = (result: ClaudeRunResult) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-
-    const timeout = opts.timeoutMs
-      ? setTimeout(() => {
-          child.kill("SIGKILL");
-          finish({ outcome: "infra_fail", errorDetail: "timed out" });
-        }, opts.timeoutMs)
-      : null;
-
-    const rl = createInterface({ input: child.stdout });
-    rl.on("line", (line) => {
-      stdoutRaw += line + "\n";
-      let event: StreamEvent;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        return; // 非 JSON 的雜訊行，忽略；用量用盡的保底判定仍靠 stdoutRaw/stderr 字串比對
-      }
-      events.push(event);
-      if (event.type === "assistant") {
-        emitLiveEvents(opts.cwd, (event as { message?: unknown }).message, onEvent);
-      }
-    });
-
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-
-    child.on("error", (err) => {
-      if (timeout) clearTimeout(timeout);
-      finish({ outcome: "infra_fail", errorDetail: `spawn error: ${err.message}` });
-    });
-
-    child.on("close", (code) => {
-      if (timeout) clearTimeout(timeout);
-      if (settled) return;
-      finish(decideOutcome(events, opts.jsonSchema) ?? decideUnparseableOutcome(stdoutRaw, stderr, code));
-    });
-
-    child.stdin.write(opts.prompt);
-    child.stdin.end();
+  const events: StreamEvent[] = [];
+  let stdoutRaw = "";
+  return spawnClaude(opts, ["--output-format", "stream-json", "--verbose"], {
+    onStdout: (child) => {
+      const rl = createInterface({ input: child.stdout });
+      rl.on("line", (line) => {
+        stdoutRaw += line + "\n";
+        let event: StreamEvent;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return; // 非 JSON 的雜訊行，忽略；用量用盡的保底判定仍靠 stderr 字串比對
+        }
+        events.push(event);
+        if (event.type === "assistant") {
+          emitLiveEvents(opts.cwd, (event as { message?: unknown }).message, onEvent);
+        }
+      });
+    },
+    onClose: (code, stderr) =>
+      decideOutcome(events, opts.jsonSchema) ?? decideUnparseableOutcome(stdoutRaw, stderr, code, false),
   });
 }
