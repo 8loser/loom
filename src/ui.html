@@ -311,9 +311,15 @@
   .field .in.good { color: var(--ok); }
   .field .in.warn { color: var(--warn); }
   .field input.in { appearance: none; width: 100%; box-sizing: border-box; color: var(--text); }
-  .field input.in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* select 保留原生的下拉箭頭，那是「這欄是選的」唯一的視覺提示。 */
+  .field select.in { width: 100%; box-sizing: border-box; color: var(--text); }
+  .field .in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .field .pair { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .field .pair input.in { width: 8ch; }
+  /* 可輸入也可瀏覽的路徑欄。輸入框吃掉剩下的寬度，按鈕維持自己的大小。 */
+  .field .pick { display: flex; align-items: center; gap: 6px; }
+  .field .pick input.in { min-width: 0; }
+  .field .pick .btn { font-size: 11px; padding: 2px 8px; white-space: nowrap; }
   .sfoot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; }
   .sfoot .saved { font-size: 11.5px; color: var(--ok); }
 
@@ -609,6 +615,15 @@ function inputField(label, id, value, attrs = "") {
   return `<div class="field"><label class="label" for="${id}">${esc(label)}</label><input class="in" id="${id}" value="${esc(String(value))}" ${attrs}></div>`;
 }
 
+/** 封閉選項。目前的值不在清單裡（分支被刪了）也要留著，否則存檔會靜靜換掉它。 */
+function selectField(label, id, value, options) {
+  const all = options.includes(value) ? options : [value, ...options];
+  const opts = all
+    .map((v) => `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(v)}</option>`)
+    .join("");
+  return `<div class="field"><label class="label" for="${id}">${esc(label)}</label><select class="in" id="${id}">${opts}</select></div>`;
+}
+
 function renderSettings() {
   const el = $("pane-settings");
   if (!settings) { el.innerHTML = '<p class="note-run">讀取中…</p>'; return; }
@@ -634,8 +649,15 @@ function renderSettings() {
       <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
 
       ${field("專案路徑", ws.repoPath, "ro")}
-      ${inputField("spec 資料夾", "s-specs", ws.specsDir, 'spellcheck="false"')}
-      ${inputField("主分支", "s-branch", ws.mainBranch, 'spellcheck="false"')}
+      <!-- 可以直接打：spec 資料夾常常是還沒建的新資料夾，選取器列不到它。 -->
+      <div class="field">
+        <label class="label" for="s-specs">spec 資料夾</label>
+        <div class="pick">
+          <input class="in" id="s-specs" value="${esc(ws.specsDir)}" spellcheck="false">
+          <button class="btn" id="s-specs-browse">瀏覽…</button>
+        </div>
+      </div>
+      ${selectField("主分支", "s-branch", ws.mainBranch, settings.branches)}
 
       <div class="grp">
         <div class="grphd"><span class="label">限制</span></div>
@@ -687,6 +709,7 @@ function renderSettings() {
   for (const btn of el.querySelectorAll(".prole[data-role]")) {
     btn.addEventListener("click", () => { promptRole = btn.dataset.role; renderSettings(); });
   }
+  $("s-specs-browse").addEventListener("click", browseForSpecDir);
   $("prompt-save").addEventListener("click", () => savePrompt(role.role));
   $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
   $("s-save").addEventListener("click", saveSettings);
@@ -1173,34 +1196,58 @@ function restartLiveTick() {
 // 路徑，而這裡要的就是絕對路徑。<dialog> 的 close(value) 直接當回傳值用，Esc
 // 關閉會給空字串，剛好等於「沒選」。
 let pickerPath = null;
+// 可以逛出去的上界。選 repo 時是 null（整台機器都能逛，見 /api/browse 的註解），
+// 選 spec 資料夾時是 repo 根目錄：走出去的路徑存檔時會被 parseWorkspaceSettings
+// 擋掉，不如一開始就不給走。根目錄本身也不是合法的 spec 資料夾，所以在那一層
+// 「選這個資料夾」是關掉的。
+let pickerRoot = null;
 
 async function loadPicker(path) {
   let data;
   try {
     data = await api(`/api/browse?path=${encodeURIComponent(path ?? "")}`);
   } catch (err) {
+    // 起始路徑可能還不存在（spec 資料夾常是新的），退回根目錄而不是停在死路。
+    if (pickerRoot && path !== pickerRoot) return loadPicker(pickerRoot);
     $("picker-path").textContent = `讀不到：${err.message}`;
     return;
   }
   pickerPath = data.path;
   const base = data.path.replace(/\/$/, "");
+  const atRoot = base === pickerRoot;
+  $("picker-pick").disabled = atRoot;
   $("picker-path").textContent = data.path + (data.isRepo ? "  (git repo)" : "");
   $("picker-list").innerHTML =
-    (data.parent ? `<li data-path="${esc(data.parent)}">../</li>` : "") +
+    (data.parent && !atRoot ? `<li data-path="${esc(data.parent)}">../</li>` : "") +
     data.dirs.map((d) =>
       `<li data-path="${esc(base + "/" + d.name)}">${esc(d.name)}${d.isRepo ? '<span class="repo">git</span>' : ""}</li>`
     ).join("");
 }
 
-function browseForRepo() {
+function openPicker(start, root, onPick) {
   const dlg = $("picker");
-  loadPicker($("new-ws-path").value.trim() || null);
+  pickerRoot = root;
+  loadPicker(start);
   dlg.addEventListener("close", () => {
-    if (!dlg.returnValue) return;
-    $("new-ws-path").value = dlg.returnValue;
-    if (!$("new-ws-name").value.trim()) $("new-ws-name").value = dlg.returnValue.split("/").pop();
+    if (dlg.returnValue) onPick(dlg.returnValue);
   }, { once: true });
   dlg.showModal();
+}
+
+function browseForRepo() {
+  openPicker($("new-ws-path").value.trim() || null, null, (path) => {
+    $("new-ws-path").value = path;
+    if (!$("new-ws-name").value.trim()) $("new-ws-name").value = path.split("/").pop();
+  });
+}
+
+/** 設定頁的 spec 資料夾。存的是 repo 底下的相對路徑，選取器給的是絕對路徑。 */
+function browseForSpecDir() {
+  const root = settings.workspace.repoPath.replace(/\/+$/, "");
+  const current = $("s-specs").value.trim();
+  openPicker(current ? `${root}/${current}` : root, root, (path) => {
+    $("s-specs").value = path.slice(root.length + 1);
+  });
 }
 
 $("picker-list").addEventListener("click", (e) => {

@@ -399,6 +399,10 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
       ["loom:setup", "loom:typecheck", "loom:dev", "loom:test", "loom:e2e"],
       "the page renders this list, so it must come from devserver.ts rather than being hardcoded in ui.html",
     );
+    // 設定頁把主分支畫成選單，選項得從這裡來。spec 資料夾那欄改用 /api/browse
+    // 的選取器逐層點，所以這個回應裡沒有資料夾清單。
+    assert.deepEqual(s.branches, ["main"]);
+    assert.equal(s.specDirs, undefined);
   } finally {
     await stopTestServer(loom, httpServer);
   }

@@ -20,6 +20,19 @@ export function currentHead(cwd: string): string {
 }
 
 /**
+ * 設定頁主分支選單的選項。只列本地分支 -- rebase/merge 的目標得是本地 ref，
+ * 而且 spec branch 也是從它開出來的。repo 讀不到就回空陣列，設定頁少一個
+ * 選單不該讓整頁掛掉。
+ */
+export function listBranches(repoPath: string): string[] {
+  try {
+    return git(repoPath, ["branch", "--format=%(refname:short)"]).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * spec branch 一個 worktree，放 repo 外。branch 不存在就從 main 開一條。
  * worktree 已存在就當成冪等操作跳過（崩潰重啟後會重跑到這裡）。
  */

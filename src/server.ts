@@ -24,6 +24,7 @@ import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
 import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
 import { createDevServerTestRunner, readKnownScripts, KNOWN_SCRIPT_NAMES } from "./devserver.ts";
 import { sendChatMessage, finalizeChatDraft, stopAllChatProcesses } from "./chat.ts";
+import { listBranches } from "./git.ts";
 import {
   listSpecs,
   getSpecBoardDetail,
@@ -307,6 +308,9 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       // 加一個階段（例如 typecheck）要改兩個地方，而設定頁少列一個沒人會發現。
       scriptNames: KNOWN_SCRIPT_NAMES,
       scripts: readKnownScripts(ws.repoPath),
+      // 主分支欄的選項。spec 資料夾沒有對應的清單 -- 那一欄用 /api/browse
+      // 的資料夾選取器，逐層點進去，不預先把整棵樹送過來。
+      branches: listBranches(ws.repoPath),
     });
   });
 
