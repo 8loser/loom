@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { serve, type ServerType } from "@hono/node-server";
 
 import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
@@ -126,6 +126,27 @@ test("workspace CRUD: create then list", async () => {
       body: JSON.stringify({ name: "demo-ws", repoPath }),
     });
     assert.equal(dup.status, 409);
+  } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
+test("browse lists sub-directories and flags which ones are git repos", async () => {
+  const repoPath = initRepoWithDraftSpec();
+  const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
+  try {
+    const res = await fetch(`${base}/api/browse?path=${encodeURIComponent(dirname(repoPath))}`);
+    const body = await res.json();
+    assert.equal(body.path, resolve(dirname(repoPath)), "回的是 resolve 過的絕對路徑");
+    const entry = body.dirs.find((d: { name: string }) => d.name === basename(repoPath));
+    assert.ok(entry, "the repo we just created shows up under its parent");
+    assert.equal(entry.isRepo, true, ".git is what marks a directory as pickable");
+
+    const inside = await fetch(`${base}/api/browse?path=${encodeURIComponent(repoPath)}`);
+    assert.equal((await inside.json()).isRepo, true);
+
+    const missing = await fetch(`${base}/api/browse?path=${encodeURIComponent(join(repoPath, "no-such-dir"))}`);
+    assert.equal(missing.status, 400, "unreadable path is an error, not an empty listing");
   } finally {
     await stopTestServer(loom, httpServer);
   }

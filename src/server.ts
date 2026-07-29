@@ -1,9 +1,10 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { openDb, listWorkspaces, insertWorkspace, getWorkspace, type Workspace } from "./db.ts";
 import { createClaudeAgentRunner, DEFAULT_PROMPTS } from "./agent.ts";
@@ -21,8 +22,14 @@ import {
   type TestRunner,
 } from "./orchestrator.ts";
 
-// 看板頁。啟動時讀一次，跟著 server.ts 一起發佈，沒有 build step。
+// 看板頁。啟動時讀一次，跟著 server.ts 一起發佈，沒有 build step。改了它要重啟
+// server 才生效 -- npm run dev 的 --watch 會自動做這件事。
 const UI = readFileSync(new URL("./ui.html", import.meta.url), "utf8");
+
+// 這個進程的識別碼。server 一重啟（改程式碼、--watch 觸發），瀏覽器的
+// EventSource 會自己重連，前端比對這個值就知道背後換了新進程、手上這份
+// ui.html 可能過期，該重載。省掉一套獨立的 hot reload 通道。
+const BOOT_ID = randomUUID();
 
 // ponytail: 真的 dev server 生命週期（loom:test/loom:e2e、port 分配）還沒做
 // （見 DESIGN.md「dev server 生命週期」），testing 階段先全部當綠燈通過，
@@ -93,6 +100,29 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
   app.get("/", (c) => c.html(UI));
 
   app.get("/api/workspaces", (c) => c.json(listWorkspaces(db)));
+
+  // 新增 workspace 要的是 repo 的絕對路徑，但瀏覽器的資料夾選取（webkitdirectory
+  // / showDirectoryPicker）基於安全設計一律不給絕對路徑。server 跟瀏覽器在同一台
+  // 機器上，所以改由這裡列目錄，前端拿它做選取器。只回目錄名稱，不碰檔案內容。
+  // 不限制可瀏覽的根目錄：POST /api/workspaces 本來就收任意絕對路徑並在那裡跑
+  // agent，列目錄名是更小的權限，限制在 homedir 之下反而擋掉 repo 放 /mnt、
+  // /srv 的正常用法。前提是 server 綁 127.0.0.1（見檔案最後的 serve()）--
+  // 哪天要對外開，這條跟 workspaces 那條都得先有驗證。
+  app.get("/api/browse", (c) => {
+    const path = resolve(c.req.query("path") || homedir());
+    let entries;
+    try {
+      entries = readdirSync(path, { withFileTypes: true });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    const dirs = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => ({ name: e.name, isRepo: existsSync(join(path, e.name, ".git")) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const parent = dirname(path);
+    return c.json({ path, parent: parent === path ? null : parent, dirs, isRepo: existsSync(join(path, ".git")) });
+  });
 
   app.post("/api/workspaces", async (c) => {
     const body = await c.req.json();
@@ -204,7 +234,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
         onAborted();
       });
 
-      await stream.writeSSE({ event: "connected", data: "{}" });
+      await stream.writeSSE({ event: "connected", data: JSON.stringify({ bootId: BOOT_ID }) });
       while (!stream.closed) {
         const woke = await new Promise<"timer" | "aborted">((resolve) => {
           const timer = setTimeout(() => resolve("timer"), 25_000);

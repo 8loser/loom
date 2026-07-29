@@ -225,6 +225,25 @@
     border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); width: 15ch;
   }
   #err { color: var(--crit); font-size: 12.5px; padding: 6px 16px; min-height: 1.4em; }
+
+  #picker, #newws {
+    border: 1px solid var(--border-strong); border-radius: 4px; padding: 0;
+    background: var(--surface); color: var(--text); width: min(560px, 90vw);
+  }
+  #picker::backdrop, #newws::backdrop { background: rgba(0, 0, 0, 0.5); }
+  #newws .addws { padding: 14px; flex-wrap: wrap; }
+  #newws-acts { display: flex; gap: 8px; align-items: center; padding: 0 14px 14px; }
+  /* modal 開著時背後的 #err 會被 backdrop 蓋掉，所以這裡自己顯示錯誤。 */
+  #newws-err { color: var(--crit); font-size: 12px; margin-right: auto; }
+  #picker-path {
+    padding: 10px 14px; border-bottom: 1px solid var(--border-strong); font-size: 12px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; word-break: break-all;
+  }
+  #picker-list { list-style: none; margin: 0; padding: 4px 0; max-height: 50vh; overflow-y: auto; }
+  #picker-list li { padding: 5px 14px; font-size: 13px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  #picker-list li:hover { background: var(--bg); }
+  #picker-list .repo { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 2px; padding: 0 4px; }
+  #picker-acts { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--border-strong); }
 </style>
 
 <div class="app">
@@ -236,6 +255,28 @@
   </div>
 </div>
 <div id="err"></div>
+
+<dialog id="newws">
+  <div class="addws">
+    <input id="new-ws-name" placeholder="workspace 名稱">
+    <input id="new-ws-path" placeholder="/絕對路徑/到/repo" style="width:26ch">
+    <button class="btn" id="browse-ws">瀏覽…</button>
+  </div>
+  <div id="newws-acts">
+    <span id="newws-err"></span>
+    <button class="btn" id="newws-cancel">取消</button>
+    <button class="btn primary" id="add-ws">新增</button>
+  </div>
+</dialog>
+
+<dialog id="picker">
+  <div id="picker-path"></div>
+  <ul id="picker-list"></ul>
+  <div id="picker-acts">
+    <button class="btn" id="picker-cancel">取消</button>
+    <button class="btn primary" id="picker-pick">選這個資料夾</button>
+  </div>
+</dialog>
 
 <script>
 const ISSUE_LABEL = {
@@ -321,12 +362,8 @@ function renderTopbar() {
   const topbar = $("topbar");
   if (!currentWs) {
     topbar.innerHTML = `<span class="brand">LOOM</span>
-      <span class="addws">
-        <input id="new-ws-name" placeholder="workspace 名稱">
-        <input id="new-ws-path" placeholder="/絕對路徑/到/repo" style="width:22ch">
-        <button class="btn primary" id="add-ws">新增</button>
-      </span>`;
-    $("add-ws").addEventListener("click", addWorkspace);
+      <button class="btn primary" id="open-newws">新增 workspace</button>`;
+    $("open-newws").addEventListener("click", openNewWorkspace);
     return;
   }
   const ws = workspaces.find((w) => w.name === currentWs);
@@ -335,6 +372,7 @@ function renderTopbar() {
   topbar.innerHTML = `
     <span class="brand">LOOM</span>
     <select id="ws-select">${opts}</select>
+    <button class="btn" id="open-newws" title="新增 workspace">+</button>
     <div class="meters">
       <span class="meter"><span class="label">同時執行</span><span class="v">${s.runningCount} / ${ws.parallelLimit}</span></span>
       <span class="meter"><span class="label">近 24h token</span><span class="v">輸入 ${fmtTokens(s.recentInputTokens)} · 輸出 ${fmtTokens(s.recentOutputTokens)}</span></span>
@@ -343,6 +381,7 @@ function renderTopbar() {
       <button class="btn" id="toggle-pause">${board.paused ? "繼續" : "暫停"}</button>
     </div>`;
   $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; refresh(); });
+  $("open-newws").addEventListener("click", openNewWorkspace);
   $("toggle-pause").addEventListener("click", async () => {
     await api(`/api/workspaces/${encodeURIComponent(currentWs)}/${board.paused ? "resume" : "pause"}`, { method: "POST" });
     refresh();
@@ -590,22 +629,75 @@ function restartLiveTick() {
   }, 1000);
 }
 
+// 資料夾選取器。路徑由 /api/browse 提供 -- 瀏覽器自己的資料夾選取拿不到絕對
+// 路徑，而這裡要的就是絕對路徑。<dialog> 的 close(value) 直接當回傳值用，Esc
+// 關閉會給空字串，剛好等於「沒選」。
+let pickerPath = null;
+
+async function loadPicker(path) {
+  let data;
+  try {
+    data = await api(`/api/browse?path=${encodeURIComponent(path ?? "")}`);
+  } catch (err) {
+    $("picker-path").textContent = `讀不到：${err.message}`;
+    return;
+  }
+  pickerPath = data.path;
+  const base = data.path.replace(/\/$/, "");
+  $("picker-path").textContent = data.path + (data.isRepo ? "  (git repo)" : "");
+  $("picker-list").innerHTML =
+    (data.parent ? `<li data-path="${esc(data.parent)}">../</li>` : "") +
+    data.dirs.map((d) =>
+      `<li data-path="${esc(base + "/" + d.name)}">${esc(d.name)}${d.isRepo ? '<span class="repo">git</span>' : ""}</li>`
+    ).join("");
+}
+
+function browseForRepo() {
+  const dlg = $("picker");
+  loadPicker($("new-ws-path").value.trim() || null);
+  dlg.addEventListener("close", () => {
+    if (!dlg.returnValue) return;
+    $("new-ws-path").value = dlg.returnValue;
+    if (!$("new-ws-name").value.trim()) $("new-ws-name").value = dlg.returnValue.split("/").pop();
+  }, { once: true });
+  dlg.showModal();
+}
+
+$("picker-list").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-path]");
+  if (li) loadPicker(li.dataset.path);
+});
+$("picker-cancel").addEventListener("click", () => $("picker").close(""));
+$("picker-pick").addEventListener("click", () => $("picker").close(pickerPath ?? ""));
+
+function openNewWorkspace() {
+  $("new-ws-name").value = "";
+  $("new-ws-path").value = "";
+  $("newws-err").textContent = "";
+  $("newws").showModal();
+}
+
 async function addWorkspace() {
   const name = $("new-ws-name").value.trim();
   const repoPath = $("new-ws-path").value.trim();
-  if (!name || !repoPath) { say("名稱與路徑都要填。"); return; }
+  if (!name || !repoPath) { $("newws-err").textContent = "名稱與路徑都要填。"; return; }
   try {
     await api("/api/workspaces", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, repoPath }),
     });
+    $("newws").close();
     currentWs = name;
     await refresh();
   } catch (err) {
-    say(`新增 workspace 失敗：${err.message}`);
+    $("newws-err").textContent = `新增失敗：${err.message}`;
   }
 }
+
+$("add-ws").addEventListener("click", addWorkspace);
+$("browse-ws").addEventListener("click", browseForRepo);
+$("newws-cancel").addEventListener("click", () => $("newws").close());
 
 document.addEventListener("click", async (e) => {
   const actBtn = e.target.closest("button[data-act]");
@@ -634,6 +726,15 @@ document.addEventListener("click", async (e) => {
 });
 
 const events = new EventSource("/api/events");
+// EventSource 斷線會自己重連。重連後 bootId 換了代表 server 是新起的進程，
+// 手上這份 HTML/JS 可能已經跟後端對不上，直接重載。npm run dev 的 --watch
+// 靠這條讓改完 ui.html 不用手動 F5；一般重啟 server 也適用。
+let bootId = null;
+events.addEventListener("connected", (e) => {
+  const id = JSON.parse(e.data).bootId;
+  if (bootId && bootId !== id) location.reload();
+  bootId = id;
+});
 events.addEventListener("board-changed", (e) => {
   const data = JSON.parse(e.data);
   if (!currentWs || data.workspace === currentWs) refresh();
