@@ -269,6 +269,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(`loom listening on http://127.0.0.1:${port}`);
   const shutdown = () => {
     loom.stop();
+    // /api/events 的 SSE 連線是長駐的 keep-alive -- Node 的 close() 要等所有
+    // 連線自然結束才會呼叫 callback，瀏覽器分頁還開著看板時永遠不會結束，
+    // Ctrl+C 就卡住不會真的退出。closeAllConnections 直接砍掉還開著的 socket
+    // （見 server.test.ts 的 stopTestServer，這裡是同一個問題的正式執行路徑）。
+    // ServerType 涵蓋 http2，其宣告沒有這個方法，但這裡起的一定是
+    // node:http 的 Server（serve() 沒有傳 createServer: http2 選項）。
+    (httpServer as unknown as { closeAllConnections(): void }).closeAllConnections();
     httpServer.close(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
