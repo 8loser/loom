@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import type { RunUsage } from "./db.ts";
 
 // 形狀是實測出來的（claude 2.1.220，`--output-format json --json-schema ...`），
@@ -32,6 +33,18 @@ interface RateLimitEvent {
 
 type StreamEvent = ResultEvent | RateLimitEvent | { type: string; [k: string]: unknown };
 
+// 看板「即時輸出」用的事件粒度：一個 assistant 內容區塊一筆，不追蹤
+// token-level 的 partial delta（沒帶 --include-partial-messages），也不等
+// tool_result 回來 -- 呼叫本身發生的當下就夠讓人看懂 agent 在幹嘛，等結果
+// 只是多一層狀態要追蹤（tool_use_id 對應），換不到看板需要的東西。
+export type LiveEventKind = "say" | "read" | "edit" | "bash" | "search" | "tool";
+
+export interface LiveEvent {
+  at: number;
+  kind: LiveEventKind;
+  text: string;
+}
+
 export interface ClaudeSpawnOptions {
   cwd: string;
   prompt: string;
@@ -42,6 +55,15 @@ export interface ClaudeSpawnOptions {
   model?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /**
+   * 有給的話改叫 `--output-format stream-json` 逐行解析，每個 assistant
+   * 內容區塊（說話或呼叫工具）即時回呼一次；沒給就維持 `--output-format
+   * json` 一次性解析的既有路徑，行為完全不變。stream-json 的事件形狀是查
+   * 官方文件（code.claude.com/docs）確認的，不是像 json 格式那樣實測過 --
+   * 這裡的隔離 flag 組合有沒有跟文件描述的一致沒有驗證到，解析失敗時直接
+   * 略過該行，不影響 result 事件的判讀（見 runClaudeStreaming）。
+   */
+  onEvent?: (event: LiveEvent) => void;
 }
 
 export type ClaudeOutcome = "ok" | "infra_fail" | "usage_exhausted";
@@ -80,15 +102,66 @@ function classifyRateLimitEvents(events: StreamEvent[]): boolean {
   });
 }
 
-/**
- * 低階 spawn：跑一次 `claude -p`，等它結束，回傳最後的 result 事件。
- * 不做重試、不做角色相關的 prompt 組裝 -- 那些在 agent.ts。
- */
-export function runClaude(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
+// 兩個 spawn 路徑（一次性 JSON / 逐行 stream-json）跑完都會走到「有沒有
+// result 事件」這個判斷 -- 抽出來共用，不是各自重寫一遍用量用盡/is_error/
+// schema 缺漏這三條規則。
+function decideOutcome(events: StreamEvent[], jsonSchema: object | undefined): ClaudeRunResult | null {
+  const result = events.find((e): e is ResultEvent => e.type === "result");
+  if (!result) return null;
+
+  if (classifyRateLimitEvents(events)) {
+    return {
+      outcome: "usage_exhausted",
+      sessionId: result.session_id,
+      errorDetail: "rate_limit_event reported non-allowed status",
+    };
+  }
+
+  if (result.is_error) {
+    const detail = `${result.subtype} ${result.api_error_status ?? ""}`.trim();
+    const marker = detail.toLowerCase();
+    const outcome: ClaudeOutcome = USAGE_EXHAUSTION_MARKERS.some((m) => marker.includes(m))
+      ? "usage_exhausted"
+      : "infra_fail";
+    return { outcome, sessionId: result.session_id, errorDetail: detail };
+  }
+
+  if (jsonSchema && result.structured_output === undefined) {
+    return {
+      outcome: "infra_fail",
+      sessionId: result.session_id,
+      errorDetail: "schema requested but structured_output missing",
+    };
+  }
+
+  return {
+    outcome: "ok",
+    sessionId: result.session_id,
+    structuredOutput: result.structured_output,
+    usage: {
+      durationMs: result.duration_ms,
+      inputTokens: result.usage.input_tokens,
+      cacheReadTokens: result.usage.cache_read_input_tokens,
+      cacheCreationTokens: result.usage.cache_creation_input_tokens,
+      outputTokens: result.usage.output_tokens,
+      costUsd: result.total_cost_usd,
+    },
+  };
+}
+
+function decideUnparseableOutcome(stdout: string, stderr: string, code: number | null): ClaudeRunResult {
+  const marker = [stdout, stderr].join("\n").toLowerCase();
+  if (USAGE_EXHAUSTION_MARKERS.some((m) => marker.includes(m))) {
+    return { outcome: "usage_exhausted", errorDetail: stderr.slice(-2000) };
+  }
+  return {
+    outcome: "infra_fail",
+    errorDetail: `exit ${code}, unparseable output: ${stderr.slice(-2000) || stdout.slice(-2000)}`,
+  };
+}
+
+function isolationArgs(opts: ClaudeSpawnOptions): string[] {
   const args = [
-    "-p",
-    "--output-format",
-    "json",
     "--setting-sources",
     "project,local",
     "--strict-mcp-config",
@@ -100,6 +173,19 @@ export function runClaude(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
   if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
   if (opts.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
   if (opts.tools) args.push("--tools", opts.tools.join(","));
+  return args;
+}
+
+/**
+ * 低階 spawn：跑一次 `claude -p`，等它結束，回傳最後的 result 事件。
+ * 不做重試、不做角色相關的 prompt 組裝 -- 那些在 agent.ts。
+ */
+export function runClaude(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
+  return opts.onEvent ? runClaudeStreaming(opts, opts.onEvent) : runClaudeBuffered(opts);
+}
+
+function runClaudeBuffered(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
+  const args = ["-p", "--output-format", "json", ...isolationArgs(opts)];
 
   return new Promise((resolve) => {
     const child = spawn("claude", args, {
@@ -146,65 +232,115 @@ export function runClaude(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
         // 兩種都處理，不假設哪一種才是「正常」的。
         events = Array.isArray(parsed) ? parsed : [parsed as StreamEvent];
       } catch {
-        const marker = [stdout, stderr].join("\n").toLowerCase();
-        if (USAGE_EXHAUSTION_MARKERS.some((m) => marker.includes(m))) {
-          finish({ outcome: "usage_exhausted", errorDetail: stderr.slice(-2000) });
-        } else {
-          finish({
-            outcome: "infra_fail",
-            errorDetail: `exit ${code}, unparseable output: ${stderr.slice(-2000) || stdout.slice(-2000)}`,
-          });
-        }
+        finish(decideUnparseableOutcome(stdout, stderr, code));
         return;
       }
 
-      const result = events.find((e): e is ResultEvent => e.type === "result");
-      if (!result) {
-        finish({ outcome: "infra_fail", errorDetail: "no result event in output" });
-        return;
-      }
+      finish(decideOutcome(events, opts.jsonSchema) ?? { outcome: "infra_fail", errorDetail: "no result event in output" });
+    });
 
-      if (classifyRateLimitEvents(events)) {
-        finish({
-          outcome: "usage_exhausted",
-          sessionId: result.session_id,
-          errorDetail: "rate_limit_event reported non-allowed status",
-        });
-        return;
-      }
+    child.stdin.write(opts.prompt);
+    child.stdin.end();
+  });
+}
 
-      if (result.is_error) {
-        const detail = `${result.subtype} ${result.api_error_status ?? ""}`.trim();
-        const marker = detail.toLowerCase();
-        const outcome: ClaudeOutcome = USAGE_EXHAUSTION_MARKERS.some((m) => marker.includes(m))
-          ? "usage_exhausted"
-          : "infra_fail";
-        finish({ outcome, sessionId: result.session_id, errorDetail: detail });
-        return;
-      }
+function relPath(cwd: string, p: unknown): string {
+  if (typeof p !== "string") return String(p ?? "");
+  return p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
+}
 
-      if (opts.jsonSchema && result.structured_output === undefined) {
-        finish({
-          outcome: "infra_fail",
-          sessionId: result.session_id,
-          errorDetail: "schema requested but structured_output missing",
-        });
-        return;
-      }
+// ponytail: Edit/Write 只顯示檔名，不算真的 +/- 行數（要嘛自己實作 diff
+// 演算法要嘛每次多 spawn 一個 git diff，兩者都換不到「看得懂 agent 在幹嘛」
+//這個目標）；搜尋只顯示 pattern，不等 tool_result 回來算命中數。要補的話
+// 對照 mockup.html 的 .line.diff。
+function describeToolUse(cwd: string, name: string, input: Record<string, unknown>): { kind: LiveEventKind; text: string } {
+  switch (name) {
+    case "Read":
+      return { kind: "read", text: relPath(cwd, input.file_path) };
+    case "Edit":
+    case "Write":
+      return { kind: "edit", text: relPath(cwd, input.file_path) };
+    case "Bash": {
+      const cmd = String(input.command ?? "");
+      const firstLine = cmd.split("\n")[0];
+      return { kind: "bash", text: firstLine.length < cmd.length ? `${firstLine} …` : firstLine };
+    }
+    case "Grep":
+    case "Glob":
+      return { kind: "search", text: String(input.pattern ?? input.query ?? "") };
+    default:
+      return { kind: "tool", text: name };
+  }
+}
 
-      finish({
-        outcome: "ok",
-        sessionId: result.session_id,
-        structuredOutput: result.structured_output,
-        usage: {
-          durationMs: result.duration_ms,
-          inputTokens: result.usage.input_tokens,
-          cacheReadTokens: result.usage.cache_read_input_tokens,
-          cacheCreationTokens: result.usage.cache_creation_input_tokens,
-          outputTokens: result.usage.output_tokens,
-          costUsd: result.total_cost_usd,
-        },
-      });
+function emitLiveEvents(cwd: string, message: unknown, onEvent: (event: LiveEvent) => void): void {
+  const content = (message as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return;
+  const at = Date.now();
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: string; text?: string; name?: string; input?: Record<string, unknown> };
+    if (b.type === "text" && b.text) {
+      onEvent({ at, kind: "say", text: b.text });
+    } else if (b.type === "tool_use" && b.name) {
+      onEvent({ at, ...describeToolUse(cwd, b.name, b.input ?? {}) });
+    }
+  }
+}
+
+function runClaudeStreaming(opts: ClaudeSpawnOptions, onEvent: (event: LiveEvent) => void): Promise<ClaudeRunResult> {
+  const args = ["-p", "--output-format", "stream-json", "--verbose", ...isolationArgs(opts)];
+
+  return new Promise((resolve) => {
+    const child = spawn("claude", args, {
+      cwd: opts.cwd,
+      env: opts.env ?? process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const events: StreamEvent[] = [];
+    let stdoutRaw = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (result: ClaudeRunResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const timeout = opts.timeoutMs
+      ? setTimeout(() => {
+          child.kill("SIGKILL");
+          finish({ outcome: "infra_fail", errorDetail: "timed out" });
+        }, opts.timeoutMs)
+      : null;
+
+    const rl = createInterface({ input: child.stdout });
+    rl.on("line", (line) => {
+      stdoutRaw += line + "\n";
+      let event: StreamEvent;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return; // 非 JSON 的雜訊行，忽略；用量用盡的保底判定仍靠 stdoutRaw/stderr 字串比對
+      }
+      events.push(event);
+      if (event.type === "assistant") {
+        emitLiveEvents(opts.cwd, (event as { message?: unknown }).message, onEvent);
+      }
+    });
+
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+
+    child.on("error", (err) => {
+      if (timeout) clearTimeout(timeout);
+      finish({ outcome: "infra_fail", errorDetail: `spawn error: ${err.message}` });
+    });
+
+    child.on("close", (code) => {
+      if (timeout) clearTimeout(timeout);
+      if (settled) return;
+      finish(decideOutcome(events, opts.jsonSchema) ?? decideUnparseableOutcome(stdoutRaw, stderr, code));
     });
 
     child.stdin.write(opts.prompt);

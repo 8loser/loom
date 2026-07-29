@@ -11,6 +11,7 @@ import {
   getVerifiedMainSha,
   setIssueBaseSha,
   startRun,
+  getLatestRun,
   type Db,
   type Workspace,
 } from "./db.ts";
@@ -26,12 +27,14 @@ import {
   acknowledgeStale,
   getSpecBoardDetail,
   getWorkspaceSummary,
+  createLiveOutputStore,
   type Ctx,
   type AgentRunner,
   type AgentRequest,
   type AgentResponse,
   type TestRunner,
 } from "./orchestrator.ts";
+import type { LiveEvent } from "./claude.ts";
 
 const scratchRoot = join(process.env.CLAUDE_JOB_DIR ?? ".", "tmp", "orchestrator-test");
 mkdirSync(scratchRoot, { recursive: true });
@@ -542,7 +545,8 @@ test("getSpecBoardDetail: mergeable spec reports real cost/token totals, elapsed
 
 test("getSpecBoardDetail: currentIssue reports the in-flight run's role and attempt for a mid-state issue", () => {
   const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const live = createLiveOutputStore();
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot, live };
 
   // 手動把 issue 推到 implementing、開一筆未結束的 run -- 只驗證讀模型，
   // 不需要真的跑一次 coder 或等它完成。
@@ -552,7 +556,16 @@ test("getSpecBoardDetail: currentIssue reports the in-flight run's role and atte
     writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "implementing", e2e: false, blockedBy: [] }),
   );
   setIssueBaseSha(db, workspace.id, "demo", "01", "deadbeef");
-  startRun(db, { workspaceId: workspace.id, spec: "demo", issue: "01", role: "coder", attempt: 1, baseSha: "deadbeef" });
+  const runId = startRun(db, {
+    workspaceId: workspace.id,
+    spec: "demo",
+    issue: "01",
+    role: "coder",
+    attempt: 1,
+    baseSha: "deadbeef",
+  });
+  live.append(runId, { at: 1000, kind: "say", text: "reading spec" });
+  live.append(runId, { at: 1001, kind: "read", text: "spec.md" });
 
   const detail = getSpecBoardDetail(ctx, "demo");
   assert.equal(detail.currentIssue?.id, "01");
@@ -560,6 +573,86 @@ test("getSpecBoardDetail: currentIssue reports the in-flight run's role and atte
   assert.equal(detail.currentIssue?.attempt, 1);
   assert.equal(detail.currentIssue?.diffStat, null, "coder role doesn't get a diff stat, only issue_reviewer does");
   assert.equal(detail.behindMain, null, "spec branch was never created, there's nothing to compare");
+  assert.deepEqual(
+    detail.currentIssue?.liveEvents.map((e) => e.text),
+    ["reading spec", "spec.md"],
+    "liveEvents is read from ctx.live keyed by this run's id",
+  );
+});
+
+test("getSpecBoardDetail: currentIssue.liveEvents is empty when ctx.live isn't wired up (tests/stub runners don't need it)", () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+
+  const issuePath = join(ctx.workspace.repoPath, "specs", "demo", "issues", "01-issue.md");
+  writeFileSync(
+    issuePath,
+    writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "implementing", e2e: false, blockedBy: [] }),
+  );
+  startRun(db, { workspaceId: workspace.id, spec: "demo", issue: "01", role: "coder", attempt: 1, baseSha: null });
+
+  const detail = getSpecBoardDetail(ctx, "demo");
+  assert.deepEqual(detail.currentIssue?.liveEvents, []);
+});
+
+test("createLiveOutputStore: append/get/clear are keyed by run id, onAppend fires per event", () => {
+  const appended: number[] = [];
+  const live = createLiveOutputStore((runId) => appended.push(runId));
+
+  assert.deepEqual(live.get(1), [], "nothing appended yet");
+
+  const e1: LiveEvent = { at: 1, kind: "say", text: "a" };
+  const e2: LiveEvent = { at: 2, kind: "bash", text: "pnpm test" };
+  const e3: LiveEvent = { at: 3, kind: "read", text: "other run" };
+  live.append(1, e1);
+  live.append(1, e2);
+  live.append(2, e3);
+
+  assert.deepEqual(live.get(1), [e1, e2], "events accumulate in order, scoped to their run id");
+  assert.deepEqual(live.get(2), [e3]);
+  assert.deepEqual(appended, [1, 1, 2], "onAppend fires once per append, with that event's run id");
+
+  live.clear(1);
+  assert.deepEqual(live.get(1), [], "cleared run reads back empty");
+  assert.deepEqual(live.get(2), [e3], "clearing one run id doesn't touch another");
+});
+
+test("live output: onEvent passed to the coder agent lands in ctx.live while the run is in flight, then gets cleared once it settles", async () => {
+  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const live = createLiveOutputStore();
+  let snapshotDuringRun: LiveEvent[] = [];
+  let runIdDuringRun: number | null = null;
+
+  const agent: AgentRunner = async (req) => {
+    if (req.role === "coder") {
+      assert.ok(req.onEvent, "ctx.live being set means the request carries a live onEvent callback");
+      req.onEvent!({ at: 1, kind: "say", text: "reading spec" });
+      req.onEvent!({ at: 2, kind: "read", text: "spec.md" });
+      runIdDuringRun = getLatestRun(db, workspace.id, "demo", "01")!.id;
+      // 快照當下的陣列參照：doImplement 在 agent() resolve 後會 clear()，
+      // 但 clear 只是把 map 裡的 entry 刪掉，不會清空這個已經拿到手的陣列 --
+      // 用它來斷言「run 還在跑的當下，事件真的進了 store」。
+      snapshotDuringRun = live.get(runIdDuringRun);
+      writeFileSync(join(req.worktreePath, "output.txt"), "done\n");
+      return { outcome: "ok", usage: USAGE, coder: { done: true, summary: "did it", filesChanged: ["output.txt"] } };
+    }
+    if (req.role === "issue_reviewer") {
+      return { outcome: "ok", usage: USAGE, issueReview: { verdict: "pass", comments: [] } };
+    }
+    return { outcome: "ok", usage: USAGE, specReview: { comments: [] } };
+  };
+
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot, live };
+  await runUntilIdle(ctx, "demo");
+
+  assert.ok(runIdDuringRun !== null, "the coder branch above must have run");
+  assert.ok(snapshotDuringRun.length > 0, "onEvent must have fired inside the coder branch above");
+  assert.deepEqual(
+    snapshotDuringRun.map((e) => e.text),
+    ["reading spec", "spec.md"],
+    "events appended via onEvent were visible in ctx.live mid-run",
+  );
+  assert.deepEqual(live.get(runIdDuringRun!), [], "cleared once ctx.agent() resolved, so it doesn't leak into later reads");
 });
 
 test("getSpecBoardDetail: issueFailures surfaces the last review rejection reason per issue", async () => {

@@ -187,6 +187,7 @@ export function createClaudeAgentRunner(
       tools,
       model: templates.model,
       timeoutMs,
+      onEvent: req.onEvent,
     });
 
     return toAgentResponse(req.role, result);

@@ -406,6 +406,7 @@ export function getTodayRunAggregate(db: Db, workspaceId: number, sinceMs: numbe
 }
 
 export interface LatestRun {
+  id: number;
   role: Role;
   attempt: number;
   startedAt: number;
@@ -416,13 +417,14 @@ export interface LatestRun {
 export function getLatestRun(db: Db, workspaceId: number, spec: string, issue: string): LatestRun | null {
   const row = db
     .prepare(
-      `SELECT role, attempt, started_at, finished_at FROM runs
+      `SELECT id, role, attempt, started_at, finished_at FROM runs
        WHERE workspace_id = ? AND spec = ? AND issue = ?
        ORDER BY id DESC LIMIT 1`,
     )
     .get(workspaceId, spec, issue) as Record<string, unknown> | undefined;
   if (!row) return null;
   return {
+    id: row.id as number,
     role: row.role as Role,
     attempt: row.attempt as number,
     startedAt: row.started_at as number,

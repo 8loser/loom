@@ -219,6 +219,21 @@
   .facts dd.warnish { color: var(--warn); }
   .facts dd.critish { color: var(--crit); }
 
+  .stream { overflow: auto; padding: 10px 0 14px; min-height: 0; }
+  .stream .st-head { display: flex; align-items: center; gap: 7px; padding: 0 14px 8px; }
+  .line {
+    display: grid; grid-template-columns: 52px 40px 1fr; gap: 8px; padding: 2.5px 14px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px; line-height: 1.5;
+  }
+  .line:hover { background: var(--surface-2); }
+  .line .t { color: var(--idle); font-variant-numeric: tabular-nums; }
+  .line .k { color: var(--muted); }
+  .line .m { word-break: break-word; }
+  .line.tool .k { color: var(--accent); }
+  .line.say .m { color: var(--muted); }
+  .line.now .m { color: var(--text); }
+
   .addws { display: flex; gap: 6px; align-items: center; }
   .addws input {
     font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 3px;
@@ -290,6 +305,7 @@ const SPEC_LABEL = {
   draft: "草稿", import_needed: "需匯入",
 };
 const ROLE_LABEL = { coder: "coder", issue_reviewer: "reviewer", test: "test" };
+const LIVE_KIND_LABEL = { say: "說", read: "讀取", edit: "編輯", bash: "指令", search: "搜尋", tool: "工具" };
 // blocked/human 沒有記憶「卡住前最後停在哪個 agent 階段」（front matter 只
 // 存目前狀態，不存歷史），所以一律歸類到待處理欄，靠卡片自己的樣式
 // （halted/manual）分辨，不是真的還沒開工。
@@ -598,8 +614,21 @@ function renderIssueDetail(spec, issue) {
       <div class="sub">${esc(issue.path)}</div>
     </div>
     <dl class="facts">${rows.join("") || '<dt class="label">狀態</dt><dd>沒有額外資訊</dd>'}</dl>
-    <div></div>
+    ${renderLiveStream(live)}
     ${acts.length ? `<div class="dfoot">${acts.join("")}</div>` : ""}
+  </div>`;
+}
+
+function renderLiveStream(live) {
+  if (!live || !live.liveEvents.length) return "<div></div>";
+  const lines = live.liveEvents.map((e, i) => {
+    const cls = (e.kind === "say" ? "say" : "tool") + (i === live.liveEvents.length - 1 ? " now" : "");
+    const time = new Date(e.at).toLocaleTimeString("zh-TW", { hour12: false });
+    return `<div class="line ${cls}"><span class="t">${esc(time)}</span><span class="k">${esc(LIVE_KIND_LABEL[e.kind] ?? e.kind)}</span><span class="m">${esc(e.text)}</span></div>`;
+  }).join("");
+  return `<div class="stream">
+    <div class="st-head"><span class="pulse" aria-hidden="true"></span><span class="label">${esc(ROLE_LABEL[live.role] ?? live.role)} 即時輸出</span></div>
+    ${lines}
   </div>`;
 }
 
@@ -614,6 +643,10 @@ function renderDetail() {
     const issue = spec && findIssue(selection.spec, selection.issue);
     el.innerHTML = spec && issue ? renderIssueDetail(spec, issue) : '<p class="note-run">這個 issue 不見了。</p>';
   }
+  // 每次 render 都整個重畫，捲動位置會跟著重設 -- 即時輸出永遠貼底顯示最新
+  // 一行,才有「看得到 agent 現在在幹嘛」的感覺,不用使用者自己往下拉。
+  const stream = el.querySelector(".stream");
+  if (stream) stream.scrollTop = stream.scrollHeight;
 }
 
 // 只有「目前正在跑的那個 issue」需要即時跳動的耗時數字，其餘資料都是

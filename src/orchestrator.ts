@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { Db, RunUsage, Role, Workspace } from "./db.ts";
+import type { LiveEvent } from "./claude.ts";
 import {
   startRun,
   finishRun,
@@ -69,6 +70,8 @@ export interface AgentRequest {
   attempt: number;
   diff?: string;
   lastFailure?: string;
+  /** 有給的話 runner 執行期間即時回呼，看板「即時輸出」用這個；不理會也不影響行為。 */
+  onEvent?: (event: LiveEvent) => void;
 }
 
 export type AgentResponse =
@@ -111,6 +114,38 @@ export interface Ctx {
    * worktree，這正是這裡曾經犯過的錯。
    */
   worktreesRoot?: string;
+  /** 看板「即時輸出」的暫存區，沒給就沒有這個功能（測試用的 stub agent 不需要）。 */
+  live?: LiveOutputStore;
+}
+
+/**
+ * 執行中 run 的即時輸出，只存在記憶體（DESIGN.md「完整輸出不落地」）--
+ * server 重啟就沒了，這是預期行為，不是要修的 bug。key 是 run id，跟
+ * CurrentIssueLive 讀同一列 runs 資料時用的是同一個 id，不會讀到別次
+ * attempt 留下的舊事件。
+ */
+export interface LiveOutputStore {
+  append(runId: number, event: LiveEvent): void;
+  get(runId: number): LiveEvent[];
+  clear(runId: number): void;
+}
+
+export function createLiveOutputStore(onAppend?: (runId: number) => void): LiveOutputStore {
+  const byRun = new Map<number, LiveEvent[]>();
+  return {
+    append(runId, event) {
+      const list = byRun.get(runId);
+      if (list) list.push(event);
+      else byRun.set(runId, [event]);
+      onAppend?.(runId);
+    },
+    get(runId) {
+      return byRun.get(runId) ?? [];
+    },
+    clear(runId) {
+      byRun.delete(runId);
+    },
+  };
 }
 
 function worktreePath(ctx: Ctx, spec: string): string {
@@ -318,6 +353,7 @@ async function doImplement(ctx: Ctx, spec: string, issue: IssueFile): Promise<St
     baseSha: state.baseSha,
   });
 
+  const live = ctx.live;
   const resp = await ctx.agent({
     role: "coder",
     workspace: ctx.workspace,
@@ -326,7 +362,9 @@ async function doImplement(ctx: Ctx, spec: string, issue: IssueFile): Promise<St
     worktreePath: wt,
     attempt,
     lastFailure: feedbackFor(ctx, spec, issue.id),
+    onEvent: live && ((event) => live.append(runId, event)),
   });
+  live?.clear(runId);
 
   if (resp.outcome === "usage_exhausted") {
     return handleUsageExhausted(ctx, spec, issue, runId, "coder");
@@ -369,6 +407,7 @@ async function doIssueReview(ctx: Ctx, spec: string, issue: IssueFile): Promise<
     baseSha: state.baseSha,
   });
 
+  const live = ctx.live;
   const resp = await ctx.agent({
     role: "issue_reviewer",
     workspace: ctx.workspace,
@@ -377,7 +416,9 @@ async function doIssueReview(ctx: Ctx, spec: string, issue: IssueFile): Promise<
     worktreePath: wt,
     attempt,
     diff,
+    onEvent: live && ((event) => live.append(runId, event)),
   });
+  live?.clear(runId);
 
   if (resp.outcome === "usage_exhausted") {
     return handleUsageExhausted(ctx, spec, issue, runId, "issue_reviewer");
@@ -730,6 +771,7 @@ export interface CurrentIssueLive {
   attempt: number;
   startedAt: number;
   diffStat: { insertions: number; deletions: number } | null;
+  liveEvents: LiveEvent[];
 }
 
 export interface SpecBoardDetail extends SpecBoard {
@@ -792,6 +834,7 @@ export function getSpecBoardDetail(ctx: Ctx, spec: string): SpecBoardDetail {
           latest.role === "issue_reviewer" && state.baseSha
             ? diffShortStat(worktreePath(ctx, spec), state.baseSha)
             : null,
+        liveEvents: ctx.live?.get(latest.id) ?? [],
       };
     }
   }

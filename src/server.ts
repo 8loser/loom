@@ -16,6 +16,7 @@ import {
   redoIssue,
   acknowledgeStale,
   startScheduler,
+  createLiveOutputStore,
   type Ctx,
   type Scheduler,
   type AgentRunner,
@@ -88,6 +89,10 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       agent: opts.agent ?? createClaudeAgentRunner(DEFAULT_PROMPTS),
       test: opts.test ?? stubTestRunner,
       worktreesRoot: opts.worktreesRoot,
+      // 每個即時輸出事件都直接觸發 broadcast，讓「即時輸出」名副其實 --
+      // board 端點本來就便宜（SQLite 查詢，沒有重運算），這個 tool call
+      // 等級的頻率換不到值得另外做節流的成本。
+      live: createLiveOutputStore(() => broadcast(workspace.name)),
     };
     const scheduler = startScheduler(ctx, { pollMs: opts.pollMs, onChange: () => broadcast(workspace.name) });
     handles.set(workspace.name, { ctx, scheduler });
