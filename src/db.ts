@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
+import type { PromptRoleName } from "./prompts.ts";
+
 export type Db = DatabaseSync;
 
 export interface Workspace {
@@ -95,6 +97,20 @@ CREATE TABLE IF NOT EXISTS spec_state (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, spec)
 );
+
+-- 每個角色一份可編輯的提示詞，per-workspace（見 DESIGN.md「提示詞在 web UI
+-- 上可調」）。只有被編輯過的角色才有一列：沒有那一列就讀 prompts.ts 的內建
+-- 預設，「還原預設」是把列刪掉。這樣「這份是不是還停在出廠預設」直接等於
+-- 「DB 裡有沒有這一列」，不需要拿內容跟預設做字串比對。
+-- 不做版本歷史，編輯就是覆蓋 -- 看到 coder 一直踩同一個坑、改模板、讓當前
+-- 重試立刻吃到新版，正是這個功能的用途。
+CREATE TABLE IF NOT EXISTS prompts (
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+  role TEXT NOT NULL,
+  template TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, role)
+);
 `;
 
 export function openDb(path: string): Db {
@@ -152,6 +168,39 @@ function rowToWorkspace(row: Record<string, unknown>): Workspace {
     portRangeEnd: row.port_range_end as number,
     parallelLimit: row.parallel_limit as number,
   };
+}
+
+/**
+ * 只有 LLM 角色有提示詞，"test" 不是（見 DESIGN.md「沒有 tester agent」）。
+ * 別名 prompts.ts 的 PromptRoleName，那邊是從 DEFAULT_TEMPLATES 的 key 推導
+ * 出來的 -- 兩份手工維護的同義清單遲早會不一致。
+ */
+export type PromptRole = PromptRoleName;
+
+export function setPrompt(db: Db, workspaceId: number, role: PromptRole, template: string): void {
+  db.prepare(
+    `INSERT INTO prompts (workspace_id, role, template, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (workspace_id, role) DO UPDATE SET template = excluded.template, updated_at = excluded.updated_at`,
+  ).run(workspaceId, role, template, Date.now());
+}
+
+/** null 代表這個 workspace 還沒有那個角色的模板，呼叫端該用內建預設。 */
+export function getPrompt(db: Db, workspaceId: number, role: PromptRole): string | null {
+  const row = db
+    .prepare("SELECT template FROM prompts WHERE workspace_id = ? AND role = ?")
+    .get(workspaceId, role) as { template: string } | undefined;
+  return row?.template ?? null;
+}
+
+export function getPrompts(db: Db, workspaceId: number): Record<string, string> {
+  const rows = db
+    .prepare("SELECT role, template FROM prompts WHERE workspace_id = ?")
+    .all(workspaceId) as { role: string; template: string }[];
+  return Object.fromEntries(rows.map((r) => [r.role, r.template]));
+}
+
+export function deletePrompt(db: Db, workspaceId: number, role: PromptRole): void {
+  db.prepare("DELETE FROM prompts WHERE workspace_id = ? AND role = ?").run(workspaceId, role);
 }
 
 export function startRun(
@@ -406,6 +455,7 @@ export function getTodayRunAggregate(db: Db, workspaceId: number, sinceMs: numbe
 }
 
 export interface LatestRun {
+  id: number;
   role: Role;
   attempt: number;
   startedAt: number;
@@ -416,13 +466,14 @@ export interface LatestRun {
 export function getLatestRun(db: Db, workspaceId: number, spec: string, issue: string): LatestRun | null {
   const row = db
     .prepare(
-      `SELECT role, attempt, started_at, finished_at FROM runs
+      `SELECT id, role, attempt, started_at, finished_at FROM runs
        WHERE workspace_id = ? AND spec = ? AND issue = ?
        ORDER BY id DESC LIMIT 1`,
     )
     .get(workspaceId, spec, issue) as Record<string, unknown> | undefined;
   if (!row) return null;
   return {
+    id: row.id as number,
     role: row.role as Role,
     attempt: row.attempt as number,
     startedAt: row.started_at as number,

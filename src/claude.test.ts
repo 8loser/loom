@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { runClaude } from "./claude.ts";
+import { runClaude, decideOutcome, type StreamEvent } from "./claude.ts";
 
 // 這些測試真的會叫 claude CLI（真的花錢/花額度），用最便宜的 haiku 模型、
 // 最小的 prompt 控制成本。預設 SKIP，設 ORC_TEST_REAL_CLAUDE=1 才會跑 --
@@ -69,6 +69,63 @@ test("runClaude: unknown model name surfaces as infra_fail, not a hang or a thro
   });
   assert.equal(result.outcome, "infra_fail");
   assert.ok(result.errorDetail);
+});
+
+// 這一組不叫 CLI，餵的是實測 dump 出來的真實事件形狀（claude 2.1.220,
+// stream-json）。存在的理由：overageStatus:"rejected" 曾經被當成用量用盡的
+// 判定條件，而它其實是「這個帳號沒開超額付費」的常態設定 -- 一改用
+// stream-json，每一次呼叫都會被判成用量用盡，orchestrator 第一次呼叫就停住。
+const OK_RESULT: StreamEvent = {
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  api_error_status: null,
+  session_id: "s-1",
+  total_cost_usd: 0.01,
+  duration_ms: 1234,
+  usage: { input_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 5 },
+  structured_output: { ok: true },
+} as StreamEvent;
+
+test("decideOutcome: overageStatus 'rejected' on an allowed run is NOT usage exhaustion", () => {
+  const events: StreamEvent[] = [
+    {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        resetsAt: 1785313200,
+        rateLimitType: "five_hour",
+        overageStatus: "rejected",
+        overageDisabledReason: "out_of_credits",
+        isUsingOverage: false,
+      },
+    } as StreamEvent,
+    OK_RESULT,
+  ];
+
+  const result = decideOutcome(events, { type: "object" });
+  assert.equal(result?.outcome, "ok", "a fully successful run must not be reported as usage exhaustion");
+  assert.equal(result?.usage?.costUsd, 0.01);
+});
+
+test("decideOutcome: a genuinely non-allowed status is usage exhaustion", () => {
+  const events: StreamEvent[] = [
+    { type: "rate_limit_event", rate_limit_info: { status: "rejected" } } as StreamEvent,
+    OK_RESULT,
+  ];
+  assert.equal(decideOutcome(events, undefined)?.outcome, "usage_exhausted");
+});
+
+test("decideOutcome: schema requested but no structured_output is infra_fail, not a silent ok", () => {
+  const withoutStructured = { ...(OK_RESULT as Record<string, unknown>) };
+  delete withoutStructured.structured_output;
+  const result = decideOutcome([withoutStructured as StreamEvent], { type: "object" });
+  assert.equal(result?.outcome, "infra_fail");
+  assert.match(result?.errorDetail ?? "", /structured_output missing/);
+});
+
+test("decideOutcome: no result event at all returns null so the caller can fall back to string matching", () => {
+  assert.equal(decideOutcome([{ type: "system" } as StreamEvent], undefined), null);
 });
 
 test("runClaude: nonexistent binary is reported as infra_fail via child 'error' event, not a crash", async () => {

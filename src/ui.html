@@ -57,7 +57,11 @@
     font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--muted);
   }
 
-  .app { display: grid; grid-template-rows: auto auto 1fr; height: 100dvh; overflow: hidden; }
+  /* flex 而不是 grid-template-rows：attention 空的時候是 display:none，固定行數的
+     grid 會讓下面的 pane 遞補到 auto 行，整個版面縮成內容高度、留一大塊空白。 */
+  .app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  .app > * { flex: none; }
+  .app > .main, .app > .sheet { flex: 1; min-height: 0; }
 
   /* ---------- top bar ---------- */
   .topbar {
@@ -74,6 +78,17 @@
     color: var(--text); cursor: pointer;
     font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px;
   }
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    appearance: none; border: 1px solid transparent; background: none; color: var(--muted);
+    padding: 4px 11px; border-radius: 3px; cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .tab:hover { color: var(--text); background: var(--surface-2); }
+  .tab[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
   .meters { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
   .meter { display: flex; align-items: baseline; gap: 6px; }
   .meter .v {
@@ -109,10 +124,14 @@
 
   /* ---------- main split ---------- */
   .main { display: grid; grid-template-columns: minmax(0, 1fr) 372px; min-height: 0; }
+  /* [hidden] 要贏過上面的 display:grid，分頁切換靠它 */
+  [hidden] { display: none !important; }
 
   /* ---------- board ---------- */
   .board { overflow: auto; min-width: 0; }
   .grid { display: grid; grid-template-columns: repeat(5, minmax(178px, 1fr)); min-width: 900px; }
+  /* 還沒有 workspace 時看板是空的，min-width 仍會撐出一條沒東西可捲的橫捲軸。 */
+  .grid:empty { min-width: 0; }
   .colhead {
     position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 9px 12px 7px;
     border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 7px;
@@ -219,23 +238,134 @@
   .facts dd.warnish { color: var(--warn); }
   .facts dd.critish { color: var(--crit); }
 
+  .stream { overflow: auto; padding: 10px 0 14px; min-height: 0; }
+  .stream .st-head { display: flex; align-items: center; gap: 7px; padding: 0 14px 8px; }
+  .line {
+    display: grid; grid-template-columns: 52px 40px 1fr; gap: 8px; padding: 2.5px 14px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px; line-height: 1.5;
+  }
+  .line:hover { background: var(--surface-2); }
+  .line .t { color: var(--idle); font-variant-numeric: tabular-nums; }
+  .line .k { color: var(--muted); }
+  .line .m { word-break: break-word; }
+  .line.tool .k { color: var(--accent); }
+  .line.say .m { color: var(--muted); }
+  .line.now .m { color: var(--text); }
+
   .addws { display: flex; gap: 6px; align-items: center; }
   .addws input {
     font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 3px;
     border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); width: 15ch;
   }
   #err { color: var(--crit); font-size: 12.5px; padding: 6px 16px; min-height: 1.4em; }
+
+  /* ---------- settings ---------- */
+  .sheet { max-width: 680px; padding: 26px 24px 40px; overflow: auto; }
+  .sheet h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; text-wrap: balance; }
+  .sheet .lede { color: var(--muted); margin: 0 0 22px; max-width: 58ch; font-size: 12.5px; }
+  .sheet .grp { margin-top: 26px; }
+  .sheet .grp .label { display: block; margin-bottom: 6px; }
+  .grphd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .grphd .label { margin: 0; }
+  .grphd .aside { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+  .field {
+    display: grid; grid-template-columns: 168px 1fr; gap: 12px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  .field .in {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px; border: 1px solid var(--border-strong); border-radius: 3px;
+    padding: 5px 8px; background: var(--bg); word-break: break-all;
+  }
+  .field .in.ro { border-style: dashed; border-color: var(--border); background: transparent; color: var(--muted); }
+  .field .in.good { color: var(--ok); }
+  .field .in.warn { color: var(--warn); }
+
+  .proles { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  .prole {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--muted); border-radius: 3px; padding: 4px 10px; cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11.5px;
+  }
+  .prole:hover { color: var(--text); }
+  .prole:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .prole[aria-current="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  #ptext {
+    display: block; width: 100%; box-sizing: border-box; margin: 0; resize: vertical;
+    border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg); color: var(--text);
+    padding: 11px 12px; min-height: 340px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.6;
+  }
+  .pvars {
+    margin: 8px 0 0; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .pfoot {
+    display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 11px;
+    border-top: 1px solid var(--border);
+  }
+  .pfoot .lock {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .pfoot .spacer { margin-left: auto; }
+  .pfoot .saved { font-size: 11.5px; color: var(--ok); }
+
+  #picker, #newws {
+    border: 1px solid var(--border-strong); border-radius: 4px; padding: 0;
+    background: var(--surface); color: var(--text); width: min(560px, 90vw);
+  }
+  #picker::backdrop, #newws::backdrop { background: rgba(0, 0, 0, 0.5); }
+  #newws .addws { padding: 14px; flex-wrap: wrap; }
+  #newws-acts { display: flex; gap: 8px; align-items: center; padding: 0 14px 14px; }
+  /* modal 開著時背後的 #err 會被 backdrop 蓋掉，所以這裡自己顯示錯誤。 */
+  #newws-err { color: var(--crit); font-size: 12px; margin-right: auto; }
+  #picker-path {
+    padding: 10px 14px; border-bottom: 1px solid var(--border-strong); font-size: 12px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; word-break: break-all;
+  }
+  #picker-list { list-style: none; margin: 0; padding: 4px 0; max-height: 50vh; overflow-y: auto; }
+  #picker-list li { padding: 5px 14px; font-size: 13px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  #picker-list li:hover { background: var(--bg); }
+  #picker-list .repo { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 2px; padding: 0 4px; }
+  #picker-acts { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--border-strong); }
 </style>
 
 <div class="app">
   <header class="topbar" id="topbar"></header>
   <section class="attention" id="attention"></section>
-  <div class="main">
+  <div class="main" id="pane-board">
     <div class="board"><div class="grid" id="grid"></div></div>
     <aside class="detail" id="detail"></aside>
   </div>
+  <div class="sheet" id="pane-settings" hidden></div>
+  <!-- 放在 .app 裡：放外面時 body 會比 100dvh 高出這一條，永遠有一根直捲軸。 -->
+  <div id="err"></div>
 </div>
-<div id="err"></div>
+
+<dialog id="newws">
+  <div class="addws">
+    <input id="new-ws-name" placeholder="workspace 名稱">
+    <input id="new-ws-path" placeholder="/絕對路徑/到/repo" style="width:26ch">
+    <button class="btn" id="browse-ws">瀏覽…</button>
+  </div>
+  <div id="newws-acts">
+    <span id="newws-err"></span>
+    <button class="btn" id="newws-cancel">取消</button>
+    <button class="btn primary" id="add-ws">新增</button>
+  </div>
+</dialog>
+
+<dialog id="picker">
+  <div id="picker-path"></div>
+  <ul id="picker-list"></ul>
+  <div id="picker-acts">
+    <button class="btn" id="picker-cancel">取消</button>
+    <button class="btn primary" id="picker-pick">選這個資料夾</button>
+  </div>
+</dialog>
 
 <script>
 const ISSUE_LABEL = {
@@ -249,6 +379,7 @@ const SPEC_LABEL = {
   draft: "草稿", import_needed: "需匯入",
 };
 const ROLE_LABEL = { coder: "coder", issue_reviewer: "reviewer", test: "test" };
+const LIVE_KIND_LABEL = { say: "說", read: "讀取", edit: "編輯", bash: "指令", search: "搜尋", tool: "工具", port: "連線埠" };
 // blocked/human 沒有記憶「卡住前最後停在哪個 agent 階段」（front matter 只
 // 存目前狀態，不存歷史），所以一律歸類到待處理欄，靠卡片自己的樣式
 // （halted/manual）分辨，不是真的還沒開工。
@@ -283,6 +414,9 @@ let currentWs = null;
 let board = null; // 目前 workspace 最近一次抓到的 board 回應
 let selection = null; // {type:'spec', spec} | {type:'issue', spec, issue} | null
 let liveTimer = null;
+let tab = "board"; // 'board' | 'settings'（討論分頁還沒接，見 DESIGN.md「chat 產 spec」）
+let settings = null; // 設定分頁最近一次抓到的 /settings 與 /prompts
+let promptRole = "coder"; // 設定頁目前編輯中的角色
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -311,6 +445,12 @@ function findIssue(spec, issue) { return findSpec(spec)?.issues.find((i) => i.id
 
 function render() {
   renderTopbar();
+  $("pane-board").hidden = tab !== "board";
+  $("pane-settings").hidden = tab !== "settings";
+  $("attention").hidden = tab !== "board";
+  // 設定頁自己管重繪。這裡不碰它，否則 SSE 事件或 10 秒的保底 poll 會在
+  // 使用者編輯提示詞打到一半時把 textarea 整個換掉。
+  if (tab === "settings") return;
   renderAttention();
   renderGrid();
   renderDetail();
@@ -321,12 +461,8 @@ function renderTopbar() {
   const topbar = $("topbar");
   if (!currentWs) {
     topbar.innerHTML = `<span class="brand">LOOM</span>
-      <span class="addws">
-        <input id="new-ws-name" placeholder="workspace 名稱">
-        <input id="new-ws-path" placeholder="/絕對路徑/到/repo" style="width:22ch">
-        <button class="btn primary" id="add-ws">新增</button>
-      </span>`;
-    $("add-ws").addEventListener("click", addWorkspace);
+      <button class="btn primary" id="open-newws">新增 workspace</button>`;
+    $("open-newws").addEventListener("click", openNewWorkspace);
     return;
   }
   const ws = workspaces.find((w) => w.name === currentWs);
@@ -335,6 +471,11 @@ function renderTopbar() {
   topbar.innerHTML = `
     <span class="brand">LOOM</span>
     <select id="ws-select">${opts}</select>
+    <button class="btn" id="open-newws" title="新增 workspace">+</button>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="board" aria-selected="${tab === "board"}">看板</button>
+      <button class="tab" role="tab" data-tab="settings" aria-selected="${tab === "settings"}">設定</button>
+    </div>
     <div class="meters">
       <span class="meter"><span class="label">同時執行</span><span class="v">${s.runningCount} / ${ws.parallelLimit}</span></span>
       <span class="meter"><span class="label">近 24h token</span><span class="v">輸入 ${fmtTokens(s.recentInputTokens)} · 輸出 ${fmtTokens(s.recentOutputTokens)}</span></span>
@@ -342,12 +483,131 @@ function renderTopbar() {
       <span class="meter">${board.paused ? "" : '<span class="pulse" aria-hidden="true"></span>'}<span class="v">${board.paused ? "已暫停" : "執行中"}</span></span>
       <button class="btn" id="toggle-pause">${board.paused ? "繼續" : "暫停"}</button>
     </div>`;
-  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; refresh(); });
+  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; settings = null; refresh(); });
+  $("open-newws").addEventListener("click", openNewWorkspace);
+  for (const el of topbar.querySelectorAll(".tab[data-tab]")) {
+    el.addEventListener("click", () => switchTab(el.dataset.tab));
+  }
   $("toggle-pause").addEventListener("click", async () => {
     await api(`/api/workspaces/${encodeURIComponent(currentWs)}/${board.paused ? "resume" : "pause"}`, { method: "POST" });
     refresh();
   });
   if (board.error) say(`排程器上次執行時出錯：${board.error}`);
+}
+
+async function switchTab(next) {
+  tab = next;
+  if (tab === "settings" && !settings) {
+    try {
+      const base = `/api/workspaces/${encodeURIComponent(currentWs)}`;
+      const [info, prompts] = await Promise.all([api(`${base}/settings`), api(`${base}/prompts`)]);
+      settings = { ...info, roles: prompts.roles };
+      say("");
+    } catch (err) {
+      say(`讀設定失敗：${err.message}`);
+      return;
+    }
+  }
+  render();
+  if (tab === "settings") renderSettings();
+}
+
+function field(label, value, cls = "") {
+  return `<div class="field"><span class="label">${esc(label)}</span><span class="in ${cls}">${esc(value)}</span></div>`;
+}
+
+function renderSettings() {
+  const el = $("pane-settings");
+  if (!settings) { el.innerHTML = '<p class="note-run">讀取中…</p>'; return; }
+  const ws = settings.workspace;
+  const role = settings.roles.find((r) => r.role === promptRole) ?? settings.roles[0];
+
+  // 名稱清單由後端給（devserver.ts 的 SCRIPTS 是唯一來源），不在前端再寫一份。
+  // 固定列 loom:* 那幾個，加上專案實際定義的慣例退回名稱（typecheck/dev/test）。
+  const scriptNames = [...new Set([...settings.scriptNames, ...Object.keys(settings.scripts)])];
+  const scriptRows = scriptNames
+    .map((name) => field(name, settings.scripts[name] ?? "未定義", "ro"))
+    .join("");
+
+  const roleTabs = settings.roles
+    .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)
+    .join("");
+
+  el.innerHTML = `
+    <h2>${esc(ws.name)}</h2>
+    <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
+
+    ${field("專案路徑", ws.repoPath)}
+    ${field("spec 資料夾", ws.specsDir)}
+    ${field("主分支", ws.mainBranch)}
+
+    <div class="grp">
+      <div class="grphd"><span class="label">檢查項</span></div>
+      ${field("CLAUDE.md", settings.checks.claudeMd ? "找到，agent 會自動載入" : "找不到", settings.checks.claudeMd ? "ro good" : "ro warn")}
+      ${field("CONTEXT.md", settings.checks.contextMd ? "找到" : "找不到，建議先跑 /domain-modeling", settings.checks.contextMd ? "ro good" : "ro warn")}
+    </div>
+
+    <div class="grp">
+      <div class="grphd"><span class="label">讀到的指令</span><span class="aside">package.json</span></div>
+      ${scriptRows}
+    </div>
+
+    <div class="grp">
+      <div class="grphd"><span class="label">限制</span></div>
+      ${field("同時執行的 spec", String(ws.parallelLimit))}
+      ${field("連線埠範圍", `${ws.portRangeStart} - ${ws.portRangeEnd}`)}
+    </div>
+
+    <div class="grp">
+      <div class="grphd"><span class="label">提示詞</span><span class="aside">預設內容取自 mattpocock/skills，MIT</span></div>
+      <div class="proles">${roleTabs}</div>
+      <textarea id="ptext" spellcheck="false">${esc(role.template)}</textarea>
+      <p class="pvars">可用變數 ${role.variables.map((v) => `{${v}}`).join(" ")}</p>
+      <div class="pfoot">
+        <span class="lock">${role.schema ? `輸出 schema 唯讀 · {${Object.keys(role.schema.properties).join(", ")}}` : "沒有輸出 schema"}</span>
+        <span class="spacer"></span>
+        <span class="saved" id="prompt-saved"></span>
+        <button class="btn" id="prompt-reset" ${role.isDefault ? "disabled" : ""}>還原預設</button>
+        <button class="btn primary" id="prompt-save">儲存</button>
+      </div>
+    </div>`;
+
+  for (const btn of el.querySelectorAll(".prole[data-role]")) {
+    btn.addEventListener("click", () => { promptRole = btn.dataset.role; renderSettings(); });
+  }
+  $("prompt-save").addEventListener("click", () => savePrompt(role.role));
+  $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
+}
+
+/** 存檔與還原是同一個形狀：打一次 API，用結果更新本地那筆，重繪，報一句。 */
+async function updatePrompt(role, { what, opts, apply }) {
+  let result;
+  try {
+    result = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/prompts/${encodeURIComponent(role)}`, opts);
+  } catch (err) {
+    say(`${what}失敗：${err.message}`);
+    return;
+  }
+  apply(settings.roles.find((r) => r.role === role), result);
+  renderSettings();
+  $("prompt-saved").textContent = `已${what}`;
+}
+
+function savePrompt(role) {
+  const template = $("ptext").value;
+  return updatePrompt(role, {
+    what: "儲存",
+    opts: { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ template }) },
+    apply: (entry) => Object.assign(entry, { template, isDefault: false }),
+  });
+}
+
+function resetPrompt(role) {
+  return updatePrompt(role, {
+    what: "還原成出廠預設",
+    opts: { method: "DELETE" },
+    apply: (entry, result) => Object.assign(entry, { template: result.template, isDefault: true }),
+  });
 }
 
 function renderAttention() {
@@ -537,6 +797,10 @@ function renderIssueDetail(spec, issue) {
     if (live.attempt > 1) rows.push(`<dt class="label">嘗試</dt><dd class="warnish">第 ${live.attempt} / ${spec.domainMaxAttempts} 次</dd>`);
     if (live.diffStat) rows.push(`<dt class="label">目前 diff</dt><dd><span style="color:var(--ok)">+${live.diffStat.insertions}</span> <span style="color:var(--crit)">-${live.diffStat.deletions}</span></dd>`);
   }
+  // dev server 的 port 是 devserver.ts 用一個 kind:"port" 事件報上來的，
+  // 跟工具呼叫走同一條管線（見 claude.ts 的 LiveEventKind）。
+  const portEvent = live?.liveEvents.findLast((e) => e.kind === "port");
+  if (portEvent) rows.push(`<dt class="label">連線埠</dt><dd>${esc(portEvent.text)}</dd>`);
   if (retries) rows.push(`<dt class="label">重試</dt><dd${issue.status === "blocked" ? ' class="critish"' : ""}>domain ${retries.domain} / ${spec.domainMaxAttempts} · infra ${retries.infra} / ${spec.infraMaxAttempts}</dd>`);
   if (failure) rows.push(`<dt class="label">退回原因</dt><dd>${esc(failure)}</dd>`);
   if (issue.blockedBy.length) rows.push(`<dt class="label">依賴</dt><dd>${esc(issue.blockedBy.join(", "))}</dd>`);
@@ -559,8 +823,21 @@ function renderIssueDetail(spec, issue) {
       <div class="sub">${esc(issue.path)}</div>
     </div>
     <dl class="facts">${rows.join("") || '<dt class="label">狀態</dt><dd>沒有額外資訊</dd>'}</dl>
-    <div></div>
+    ${renderLiveStream(live)}
     ${acts.length ? `<div class="dfoot">${acts.join("")}</div>` : ""}
+  </div>`;
+}
+
+function renderLiveStream(live) {
+  if (!live || !live.liveEvents.length) return "<div></div>";
+  const lines = live.liveEvents.map((e, i) => {
+    const cls = (e.kind === "say" ? "say" : "tool") + (i === live.liveEvents.length - 1 ? " now" : "");
+    const time = new Date(e.at).toLocaleTimeString("zh-TW", { hour12: false });
+    return `<div class="line ${cls}"><span class="t">${esc(time)}</span><span class="k">${esc(LIVE_KIND_LABEL[e.kind] ?? e.kind)}</span><span class="m">${esc(e.text)}</span></div>`;
+  }).join("");
+  return `<div class="stream">
+    <div class="st-head"><span class="pulse" aria-hidden="true"></span><span class="label">${esc(ROLE_LABEL[live.role] ?? live.role)} 即時輸出</span></div>
+    ${lines}
   </div>`;
 }
 
@@ -575,6 +852,10 @@ function renderDetail() {
     const issue = spec && findIssue(selection.spec, selection.issue);
     el.innerHTML = spec && issue ? renderIssueDetail(spec, issue) : '<p class="note-run">這個 issue 不見了。</p>';
   }
+  // 每次 render 都整個重畫，捲動位置會跟著重設 -- 即時輸出永遠貼底顯示最新
+  // 一行，才有「看得到 agent 現在在幹嘛」的感覺，不用使用者自己往下拉。
+  const stream = el.querySelector(".stream");
+  if (stream) stream.scrollTop = stream.scrollHeight;
 }
 
 // 只有「目前正在跑的那個 issue」需要即時跳動的耗時數字，其餘資料都是
@@ -590,22 +871,75 @@ function restartLiveTick() {
   }, 1000);
 }
 
+// 資料夾選取器。路徑由 /api/browse 提供 -- 瀏覽器自己的資料夾選取拿不到絕對
+// 路徑，而這裡要的就是絕對路徑。<dialog> 的 close(value) 直接當回傳值用，Esc
+// 關閉會給空字串，剛好等於「沒選」。
+let pickerPath = null;
+
+async function loadPicker(path) {
+  let data;
+  try {
+    data = await api(`/api/browse?path=${encodeURIComponent(path ?? "")}`);
+  } catch (err) {
+    $("picker-path").textContent = `讀不到：${err.message}`;
+    return;
+  }
+  pickerPath = data.path;
+  const base = data.path.replace(/\/$/, "");
+  $("picker-path").textContent = data.path + (data.isRepo ? "  (git repo)" : "");
+  $("picker-list").innerHTML =
+    (data.parent ? `<li data-path="${esc(data.parent)}">../</li>` : "") +
+    data.dirs.map((d) =>
+      `<li data-path="${esc(base + "/" + d.name)}">${esc(d.name)}${d.isRepo ? '<span class="repo">git</span>' : ""}</li>`
+    ).join("");
+}
+
+function browseForRepo() {
+  const dlg = $("picker");
+  loadPicker($("new-ws-path").value.trim() || null);
+  dlg.addEventListener("close", () => {
+    if (!dlg.returnValue) return;
+    $("new-ws-path").value = dlg.returnValue;
+    if (!$("new-ws-name").value.trim()) $("new-ws-name").value = dlg.returnValue.split("/").pop();
+  }, { once: true });
+  dlg.showModal();
+}
+
+$("picker-list").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-path]");
+  if (li) loadPicker(li.dataset.path);
+});
+$("picker-cancel").addEventListener("click", () => $("picker").close(""));
+$("picker-pick").addEventListener("click", () => $("picker").close(pickerPath ?? ""));
+
+function openNewWorkspace() {
+  $("new-ws-name").value = "";
+  $("new-ws-path").value = "";
+  $("newws-err").textContent = "";
+  $("newws").showModal();
+}
+
 async function addWorkspace() {
   const name = $("new-ws-name").value.trim();
   const repoPath = $("new-ws-path").value.trim();
-  if (!name || !repoPath) { say("名稱與路徑都要填。"); return; }
+  if (!name || !repoPath) { $("newws-err").textContent = "名稱與路徑都要填。"; return; }
   try {
     await api("/api/workspaces", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, repoPath }),
     });
+    $("newws").close();
     currentWs = name;
     await refresh();
   } catch (err) {
-    say(`新增 workspace 失敗：${err.message}`);
+    $("newws-err").textContent = `新增失敗：${err.message}`;
   }
 }
+
+$("add-ws").addEventListener("click", addWorkspace);
+$("browse-ws").addEventListener("click", browseForRepo);
+$("newws-cancel").addEventListener("click", () => $("newws").close());
 
 document.addEventListener("click", async (e) => {
   const actBtn = e.target.closest("button[data-act]");
@@ -634,6 +968,15 @@ document.addEventListener("click", async (e) => {
 });
 
 const events = new EventSource("/api/events");
+// EventSource 斷線會自己重連。重連後 bootId 換了代表 server 是新起的進程，
+// 手上這份 HTML/JS 可能已經跟後端對不上，直接重載。npm run dev 的 --watch
+// 靠這條讓改完 ui.html 不用手動 F5；一般重啟 server 也適用。
+let bootId = null;
+events.addEventListener("connected", (e) => {
+  const id = JSON.parse(e.data).bootId;
+  if (bootId && bootId !== id) location.reload();
+  bootId = id;
+});
 events.addEventListener("board-changed", (e) => {
   const data = JSON.parse(e.data);
   if (!currentWs || data.workspace === currentWs) refresh();

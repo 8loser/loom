@@ -1,5 +1,5 @@
 // ponytail: hand-rolled minimal front matter parser, not general YAML.
-// loom's front matter is always flat string/bool/array-of-strings — a real
+// loom's front matter is always flat string/bool/array-of-strings -- a real
 // parser (js-yaml) is only worth adding if the field set grows past that.
 
 export type IssueStatus =

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { openDb, insertWorkspace, type Workspace } from "./db.ts";
 import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
 import { runUntilIdle, loadIssues, type Ctx, type TestRunner } from "./orchestrator.ts";
-import { createClaudeAgentRunner, DEFAULT_PROMPTS } from "./agent.ts";
+import { createClaudeAgentRunner } from "./agent.ts";
 
 // 真的端到端：真的 claude -p 當 coder 跟 issue_reviewer，真的 git worktree，
 // 只有 testing 階段（loom:test/e2e 的執行本身）維持 stub，那是另一塊還沒做
@@ -102,7 +102,7 @@ test(
       parallelLimit: 2,
     };
 
-    const agent = createClaudeAgentRunner({ ...DEFAULT_PROMPTS, model: "haiku" });
+    const agent = createClaudeAgentRunner({ model: "haiku" });
     const ctx: Ctx = { db, workspace, agent, test: stubTest(), worktreesRoot };
 
     const results = await runUntilIdle(ctx, "greeting");

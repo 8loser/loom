@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { Db, RunUsage, Role, Workspace } from "./db.ts";
+import type { LiveEvent } from "./claude.ts";
+import { allocatePort } from "./devserver.ts";
 import {
   startRun,
   finishRun,
@@ -36,6 +38,8 @@ import {
   commitStateChange,
   currentHead,
   diffRange,
+  diffForReview,
+  diffStatForReview,
   touchesPath,
   onlyTouchesSpecsDir,
   rebaseOntoMain,
@@ -54,7 +58,7 @@ import {
 
 // 這兩個上限 DESIGN.md 沒有給明確數字（domain 給了「三次」，infra 只說
 // 「獨立計數加 backoff」），infra 這裡先跟 domain 一樣是 3，屬於實作時填的
-//預設值，不是文件規定的數字。
+// 預設值，不是文件規定的數字。
 const DOMAIN_MAX_ATTEMPTS = 3;
 const INFRA_MAX_ATTEMPTS = 3;
 
@@ -65,10 +69,15 @@ export interface AgentRequest {
   workspace: Workspace;
   spec: string;
   issue: string | null; // null 只用於 spec_reviewer
+  /** issue 檔的完整路徑，模板的 {issue_md} 從這裡讀。spec_reviewer 沒有。 */
+  issuePath?: string;
   worktreePath: string;
   attempt: number;
+  baseSha?: string | null;
   diff?: string;
   lastFailure?: string;
+  /** 有給的話 runner 執行期間即時回呼，看板「即時輸出」用這個；不理會也不影響行為。 */
+  onEvent?: (event: LiveEvent) => void;
 }
 
 export type AgentResponse =
@@ -91,11 +100,31 @@ export type AgentRunner = (req: AgentRequest) => Promise<AgentResponse>;
 export interface TestResult {
   pass: boolean;
   output: string;
+  /**
+   * 沒過的話是哪一類（見 DESIGN.md「失敗與重試」的表格）。"domain" 是測試
+   * 真的紅了，退回 implementing 讓 coder 再改一次；"infra" 是 setup 失敗或
+   * 超時，那一列寫的是「直接 blocked」-- 同樣的工作量會同樣超時，再跑一次
+   * 不會不同，而且不該吃掉 coder 改 code 的三次機會。
+   */
+  failure?: "domain" | "infra";
+}
+
+export interface TestRunContext {
+  worktreePath: string;
+  /**
+   * 這一輪分配到的 port，orchestrator 從 workspace 的 range 挑（DESIGN.md
+   * 「loom 只保證 PORT 唯一，其餘隔離由專案的 script 負責」）。
+   */
+  port: number;
+  /** issue front matter 的 e2e 旗標，true 的話這個 issue 也要跑一次 e2e。 */
+  e2e?: boolean;
+  /** 跟 AgentRequest.onEvent 同一條管線，讓看板看得到測試指令跑到哪。 */
+  onEvent?: (event: LiveEvent) => void;
 }
 
 export interface TestRunner {
-  runIssueTests(worktreePath: string): Promise<TestResult>;
-  runSpecE2E(worktreePath: string): Promise<TestResult>;
+  runIssueTests(ctx: TestRunContext): Promise<TestResult>;
+  runSpecE2E(ctx: TestRunContext): Promise<TestResult>;
 }
 
 export interface Ctx {
@@ -111,6 +140,56 @@ export interface Ctx {
    * worktree，這正是這裡曾經犯過的錯。
    */
   worktreesRoot?: string;
+  /** 看板「即時輸出」的暫存區，沒給就沒有這個功能（測試用的 stub agent 不需要）。 */
+  live?: LiveOutputStore;
+}
+
+/**
+ * 執行中 run 的即時輸出，只存在記憶體（DESIGN.md「完整輸出不落地」）--
+ * server 重啟就沒了，這是預期行為，不是要修的 bug。key 是 run id，跟
+ * CurrentIssueLive 讀同一列 runs 資料時用的是同一個 id，不會讀到別次
+ * attempt 留下的舊事件。
+ */
+export interface LiveOutputStore {
+  append(runId: number, event: LiveEvent): void;
+  get(runId: number): LiveEvent[];
+  clear(runId: number): void;
+}
+
+/**
+ * 一輪 run 的即時輸出接線：拿到 onEvent 回呼，跑完把那一輪的事件清掉。
+ * 三個呼叫點（coder、issue_reviewer、testing）都是同一組動作，忘了 clear
+ * 的話那一輪的事件會一直留在記憶體裡，而且 run 結束後看板還讀得到。
+ */
+async function withLiveEvents<T>(
+  ctx: Ctx,
+  runId: number,
+  body: (onEvent?: (event: LiveEvent) => void) => Promise<T>,
+): Promise<T> {
+  const live = ctx.live;
+  try {
+    return await body(live && ((event) => live.append(runId, event)));
+  } finally {
+    live?.clear(runId);
+  }
+}
+
+export function createLiveOutputStore(onAppend?: (runId: number) => void): LiveOutputStore {
+  const byRun = new Map<number, LiveEvent[]>();
+  return {
+    append(runId, event) {
+      const list = byRun.get(runId);
+      if (list) list.push(event);
+      else byRun.set(runId, [event]);
+      onAppend?.(runId);
+    },
+    get(runId) {
+      return byRun.get(runId) ?? [];
+    },
+    clear(runId) {
+      byRun.delete(runId);
+    },
+  };
 }
 
 function worktreePath(ctx: Ctx, spec: string): string {
@@ -318,15 +397,20 @@ async function doImplement(ctx: Ctx, spec: string, issue: IssueFile): Promise<St
     baseSha: state.baseSha,
   });
 
-  const resp = await ctx.agent({
-    role: "coder",
-    workspace: ctx.workspace,
-    spec,
-    issue: issue.id,
-    worktreePath: wt,
-    attempt,
-    lastFailure: feedbackFor(ctx, spec, issue.id),
-  });
+  const resp = await withLiveEvents(ctx, runId, (onEvent) =>
+    ctx.agent({
+      role: "coder",
+      workspace: ctx.workspace,
+      spec,
+      issue: issue.id,
+      issuePath: issue.path,
+      worktreePath: wt,
+      attempt,
+      baseSha: state.baseSha,
+      lastFailure: feedbackFor(ctx, spec, issue.id),
+      onEvent,
+    }),
+  );
 
   if (resp.outcome === "usage_exhausted") {
     return handleUsageExhausted(ctx, spec, issue, runId, "coder");
@@ -369,15 +453,20 @@ async function doIssueReview(ctx: Ctx, spec: string, issue: IssueFile): Promise<
     baseSha: state.baseSha,
   });
 
-  const resp = await ctx.agent({
-    role: "issue_reviewer",
-    workspace: ctx.workspace,
-    spec,
-    issue: issue.id,
-    worktreePath: wt,
-    attempt,
-    diff,
-  });
+  const resp = await withLiveEvents(ctx, runId, (onEvent) =>
+    ctx.agent({
+      role: "issue_reviewer",
+      workspace: ctx.workspace,
+      spec,
+      issue: issue.id,
+      issuePath: issue.path,
+      worktreePath: wt,
+      attempt,
+      baseSha: state.baseSha,
+      diff,
+      onEvent,
+    }),
+  );
 
   if (resp.outcome === "usage_exhausted") {
     return handleUsageExhausted(ctx, spec, issue, runId, "issue_reviewer");
@@ -424,7 +513,28 @@ async function doTest(ctx: Ctx, spec: string, issue: IssueFile): Promise<StepRes
     baseSha: state.baseSha,
   });
 
-  const result = await ctx.test.runIssueTests(wt);
+  const port = await allocatePort(ctx.workspace.portRangeStart, ctx.workspace.portRangeEnd);
+  const result = await withLiveEvents(ctx, runId, (onEvent) =>
+    ctx.test.runIssueTests({
+      worktreePath: wt,
+      port,
+    // DESIGN.md「issue front matter 宣告 e2e: true 的：該 issue 也跑一次 e2e」。
+    // 整體 e2e 紅了自動開的 issue 一律帶這個旗標，沒有它的話那個為了修 e2e
+    // 而生的 issue 只會被 unit test 驗證，交出看起來合理但沒真正修好的改動
+    // 就能通過，回到 verifying 又紅，永遠不收斂。
+      e2e: issue.e2e,
+      onEvent,
+    }),
+  );
+
+  if (result.failure === "infra") {
+    // 「infra｜超時、setup 失敗｜直接 blocked」-- 不吃 domain 額度，也不原地
+    // 重跑（同樣的工作量會同樣超時）。
+    finishRun(ctx.db, runId, { outcome: "infra_fail", summary: result.output.slice(-2000) });
+    writeIssueStatus(ctx, spec, issue, "blocked");
+    return { advanced: true, status: "blocked", note: "test infra failure" };
+  }
+
   finishRun(ctx.db, runId, {
     outcome: result.pass ? "ok" : "domain_fail",
     summary: result.output.slice(-2000),
@@ -534,6 +644,33 @@ export type SpecStatus = ReturnType<typeof aggregateSpecStatus>;
 const MAX_E2E_FOLLOWUPS = 2;
 
 /**
+ * spec review 的 diff 送進 prompt 之前的上限。實測一個七個 commit 的分支
+ * 大約 130KB（約 38k token），在 200k context 裡佔不到五分之一，所以正常
+ * 情況一律整份送 -- spec review 要找的是「不同 issue 各自引入了重複的抽象」
+ * 「issue 03 建的東西被 issue 06 淘汰但沒刪」，那些只有攤開全貌才看得見，
+ * 截斷等於廢掉這個角色。
+ *
+ * 這個上限是給極端情況的保護（大型改名散佈到幾百個檔案）。超過就降級成
+ * 檔案清單加行數，讓 reviewer 用它的 Read/Glob/Grep 自己挑要看的 --
+ * 它的 cwd 就是完整 checkout。降級的事實會寫在 diff 裡讓它知道。
+ */
+const MAX_REVIEW_DIFF_BYTES = 400_000;
+
+function specReviewDiff(ctx: Ctx, worktreePath: string): string {
+  const full = diffForReview(worktreePath, ctx.workspace.mainBranch);
+  if (full.length <= MAX_REVIEW_DIFF_BYTES) return full;
+
+  const stat = diffStatForReview(worktreePath, ctx.workspace.mainBranch);
+  return [
+    `[loom] The full diff is ${full.length} bytes, too large to inline.`,
+    `Below is the file-level summary. Your working directory is a complete checkout of this branch,`,
+    `so read the files you care about directly.`,
+    "",
+    stat,
+  ].join("\n");
+}
+
+/**
  * 所有 issue 到達終端後呼叫：跑整體 e2e 與 spec review。e2e 紅了開一個新
  * issue（累計超過上限就 spec blocked，見 DESIGN.md）；spec review 只記錄
  * 意見，不自動開工。
@@ -543,7 +680,12 @@ export async function verifySpec(
   spec: string,
 ): Promise<{ e2ePass: boolean; comments: string[]; paused?: boolean }> {
   const wt = worktreePath(ctx, spec);
-  const e2e = await ctx.test.runSpecE2E(wt);
+  // e2e 跑在 issue 之外（沒有 issue 層的 run 可以掛），所以沒有 live 事件
+  // 的去處 -- 不傳 onEvent，看板上這一段目前是看不到的。
+  const e2e = await ctx.test.runSpecE2E({
+    worktreePath: wt,
+    port: await allocatePort(ctx.workspace.portRangeStart, ctx.workspace.portRangeEnd),
+  });
 
   if (!e2e.pass) {
     const followups = countE2EFollowups(ctx, spec);
@@ -570,6 +712,10 @@ export async function verifySpec(
     issue: null,
     worktreePath: wt,
     attempt: 1,
+    // 整個 spec branch 對 main 的 diff。reviewer 只有 Read/Glob/Grep（唯讀，
+    // 沒有 Bash），自己跑不出 git diff -- 不在這裡算好傳過去的話，模板叫它
+    // 「讀這個 spec 分支對 main 的完整 diff」就是一句它做不到的話。
+    diff: specReviewDiff(ctx, wt),
   });
 
   if (resp.outcome === "usage_exhausted") {
@@ -730,6 +876,7 @@ export interface CurrentIssueLive {
   attempt: number;
   startedAt: number;
   diffStat: { insertions: number; deletions: number } | null;
+  liveEvents: LiveEvent[];
 }
 
 export interface SpecBoardDetail extends SpecBoard {
@@ -792,6 +939,7 @@ export function getSpecBoardDetail(ctx: Ctx, spec: string): SpecBoardDetail {
           latest.role === "issue_reviewer" && state.baseSha
             ? diffShortStat(worktreePath(ctx, spec), state.baseSha)
             : null,
+        liveEvents: ctx.live?.get(latest.id) ?? [],
       };
     }
   }
@@ -902,7 +1050,7 @@ export interface Scheduler {
 /**
  * 一個 workspace 一個排程器：輪詢找出還有事做的 spec，逐一 driveSpec 到底。
  * ponytail: 同一個 workspace 底下的 spec 目前是序列處理，沒有真的用到
- * `parallelLimit` 平行跑——真平行需要先解決「commitStateChange /
+ * `parallelLimit` 平行跑 -- 真平行需要先解決「commitStateChange /
  * mergeSpecIntoMain 同時寫同一個 main checkout」的序列化問題（DESIGN.md
  * 「orchestrator 必須是單一事件迴圈」），那是獨立的一塊設計，這裡先用
  * 「同時只有一個 spec 在跑」把正確性換到手，效能之後再補。不同 workspace

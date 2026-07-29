@@ -69,6 +69,51 @@ export function diffRange(worktreePath: string, baseSha: string, toRef = "HEAD")
   return git(worktreePath, ["diff", `${baseSha}..${toRef}`]);
 }
 
+/**
+ * review 用的 diff 要排除的東西：lockfile、snapshot、build 產物。
+ *
+ * 它們對「這個改動做對了嗎」零價值，卻很容易佔掉 diff 的九成 --
+ * `package-lock.json` 改一次就是幾千行。這不是為了省 token 而截斷（那會
+ * 隨機丟掉 reviewer 要找的東西），是這些檔案本來就不該被 review。
+ *
+ * 寫死一份常見清單，不開設定欄位：DESIGN.md「不為詞彙表與規範文件開設定
+ * 欄位」的同一個理由，多開一個地方可以改就多一個地方會不一致。monorepo 的
+ * 產生檔路徑五花八門，真的漏掉的話補進這份清單，不是叫每個專案自己填。
+ *
+ * 兩個 pathspec 的坑，都是實際撞到才知道的：
+ * 1. 用長格式 `:(exclude)` 不用短格式 `:!`。短格式會把 pattern 開頭的字元
+ *    繼續當成 magic signature 解析，`:!__snapshots__/*` 直接讓 git 死在
+ *    「Unimplemented pathspec magic '_'」。
+ * 2. 不用雙星號。git 預設的比對不帶 FNM_PATHNAME，單個 `*` 本來就跨 `/`，
+ *    所以 `*.generated.*` 任何深度都中；加上雙星號前綴反而要求前面至少有
+ *    一層目錄，根目錄的檔案會漏掉。目錄類的兩種形式都列，涵蓋根目錄與
+ *    monorepo 的 packages/x/dist。
+ */
+const REVIEW_EXCLUDED = [
+  ":(exclude)package-lock.json",
+  ":(exclude)pnpm-lock.yaml",
+  ":(exclude)yarn.lock",
+  ":(exclude)bun.lockb",
+  ":(exclude)*.snap",
+  ":(exclude)*.generated.*",
+  ":(exclude)dist/*",
+  ":(exclude)*/dist/*",
+  ":(exclude)build/*",
+  ":(exclude)*/build/*",
+  ":(exclude)__snapshots__/*",
+  ":(exclude)*/__snapshots__/*",
+];
+
+/** 一個 spec 分支相對 main 的完整 diff，給 spec_reviewer 看跨 issue 的全貌。 */
+export function diffForReview(worktreePath: string, fromRef: string, toRef = "HEAD"): string {
+  return git(worktreePath, ["diff", `${fromRef}..${toRef}`, "--", ".", ...REVIEW_EXCLUDED]);
+}
+
+/** 檔案清單加增刪行數。diff 大到不值得整份送進 prompt 時改送這個。 */
+export function diffStatForReview(worktreePath: string, fromRef: string, toRef = "HEAD"): string {
+  return git(worktreePath, ["diff", `${fromRef}..${toRef}`, "--stat", "--", ".", ...REVIEW_EXCLUDED]);
+}
+
 export function diffNameOnly(
   cwd: string,
   fromRef: string,
