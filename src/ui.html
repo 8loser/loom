@@ -311,7 +311,9 @@
   .field .in.good { color: var(--ok); }
   .field .in.warn { color: var(--warn); }
   .field input.in { appearance: none; width: 100%; box-sizing: border-box; color: var(--text); }
-  .field input.in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* select 保留原生的下拉箭頭，那是「這欄是選的」唯一的視覺提示。 */
+  .field select.in { width: 100%; box-sizing: border-box; color: var(--text); }
+  .field .in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .field .pair { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .field .pair input.in { width: 8ch; }
   .sfoot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; }
@@ -609,6 +611,25 @@ function inputField(label, id, value, attrs = "") {
   return `<div class="field"><label class="label" for="${id}">${esc(label)}</label><input class="in" id="${id}" value="${esc(String(value))}" ${attrs}></div>`;
 }
 
+/**
+ * 建議清單，不是封閉選項：spec 資料夾可以填還沒建的新資料夾，所以用
+ * datalist 而不是 select。清單裡沒有的值照樣送得出去。
+ */
+function suggestField(label, id, value, options) {
+  const opts = options.map((v) => `<option value="${esc(v)}">`).join("");
+  return inputField(label, id, value, `list="${id}-opts" spellcheck="false"`) +
+    `<datalist id="${id}-opts">${opts}</datalist>`;
+}
+
+/** 封閉選項。目前的值不在清單裡（分支被刪了）也要留著，否則存檔會靜靜換掉它。 */
+function selectField(label, id, value, options) {
+  const all = options.includes(value) ? options : [value, ...options];
+  const opts = all
+    .map((v) => `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(v)}</option>`)
+    .join("");
+  return `<div class="field"><label class="label" for="${id}">${esc(label)}</label><select class="in" id="${id}">${opts}</select></div>`;
+}
+
 function renderSettings() {
   const el = $("pane-settings");
   if (!settings) { el.innerHTML = '<p class="note-run">讀取中…</p>'; return; }
@@ -634,8 +655,8 @@ function renderSettings() {
       <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
 
       ${field("專案路徑", ws.repoPath, "ro")}
-      ${inputField("spec 資料夾", "s-specs", ws.specsDir, 'spellcheck="false"')}
-      ${inputField("主分支", "s-branch", ws.mainBranch, 'spellcheck="false"')}
+      ${suggestField("spec 資料夾", "s-specs", ws.specsDir, settings.specDirs)}
+      ${selectField("主分支", "s-branch", ws.mainBranch, settings.branches)}
 
       <div class="grp">
         <div class="grphd"><span class="label">限制</span></div>
