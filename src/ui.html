@@ -305,7 +305,7 @@ const SPEC_LABEL = {
   draft: "草稿", import_needed: "需匯入",
 };
 const ROLE_LABEL = { coder: "coder", issue_reviewer: "reviewer", test: "test" };
-const LIVE_KIND_LABEL = { say: "說", read: "讀取", edit: "編輯", bash: "指令", search: "搜尋", tool: "工具" };
+const LIVE_KIND_LABEL = { say: "說", read: "讀取", edit: "編輯", bash: "指令", search: "搜尋", tool: "工具", port: "連線埠" };
 // blocked/human 沒有記憶「卡住前最後停在哪個 agent 階段」（front matter 只
 // 存目前狀態，不存歷史），所以一律歸類到待處理欄，靠卡片自己的樣式
 // （halted/manual）分辨，不是真的還沒開工。
@@ -592,6 +592,10 @@ function renderIssueDetail(spec, issue) {
     if (live.attempt > 1) rows.push(`<dt class="label">嘗試</dt><dd class="warnish">第 ${live.attempt} / ${spec.domainMaxAttempts} 次</dd>`);
     if (live.diffStat) rows.push(`<dt class="label">目前 diff</dt><dd><span style="color:var(--ok)">+${live.diffStat.insertions}</span> <span style="color:var(--crit)">-${live.diffStat.deletions}</span></dd>`);
   }
+  // dev server 的 port 是 devserver.ts 用一個 kind:"port" 事件報上來的，
+  // 跟工具呼叫走同一條管線（見 claude.ts 的 LiveEventKind）。
+  const portEvent = live?.liveEvents.findLast((e) => e.kind === "port");
+  if (portEvent) rows.push(`<dt class="label">連線埠</dt><dd>${esc(portEvent.text)}</dd>`);
   if (retries) rows.push(`<dt class="label">重試</dt><dd${issue.status === "blocked" ? ' class="critish"' : ""}>domain ${retries.domain} / ${spec.domainMaxAttempts} · infra ${retries.infra} / ${spec.infraMaxAttempts}</dd>`);
   if (failure) rows.push(`<dt class="label">退回原因</dt><dd>${esc(failure)}</dd>`);
   if (issue.blockedBy.length) rows.push(`<dt class="label">依賴</dt><dd>${esc(issue.blockedBy.join(", "))}</dd>`);

@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { Db, RunUsage, Role, Workspace } from "./db.ts";
 import type { LiveEvent } from "./claude.ts";
+import { allocatePort } from "./devserver.ts";
 import {
   startRun,
   finishRun,
@@ -96,9 +97,20 @@ export interface TestResult {
   output: string;
 }
 
+export interface TestRunContext {
+  worktreePath: string;
+  /**
+   * 這一輪分配到的 port，orchestrator 從 workspace 的 range 挑（DESIGN.md
+   * 「loom 只保證 PORT 唯一，其餘隔離由專案的 script 負責」）。
+   */
+  port: number;
+  /** 跟 AgentRequest.onEvent 同一條管線，讓看板看得到測試指令跑到哪。 */
+  onEvent?: (event: LiveEvent) => void;
+}
+
 export interface TestRunner {
-  runIssueTests(worktreePath: string): Promise<TestResult>;
-  runSpecE2E(worktreePath: string): Promise<TestResult>;
+  runIssueTests(ctx: TestRunContext): Promise<TestResult>;
+  runSpecE2E(ctx: TestRunContext): Promise<TestResult>;
 }
 
 export interface Ctx {
@@ -465,7 +477,13 @@ async function doTest(ctx: Ctx, spec: string, issue: IssueFile): Promise<StepRes
     baseSha: state.baseSha,
   });
 
-  const result = await ctx.test.runIssueTests(wt);
+  const live = ctx.live;
+  const result = await ctx.test.runIssueTests({
+    worktreePath: wt,
+    port: await allocatePort(ctx.workspace.portRangeStart, ctx.workspace.portRangeEnd),
+    onEvent: live && ((event) => live.append(runId, event)),
+  });
+  live?.clear(runId);
   finishRun(ctx.db, runId, {
     outcome: result.pass ? "ok" : "domain_fail",
     summary: result.output.slice(-2000),
@@ -584,7 +602,12 @@ export async function verifySpec(
   spec: string,
 ): Promise<{ e2ePass: boolean; comments: string[]; paused?: boolean }> {
   const wt = worktreePath(ctx, spec);
-  const e2e = await ctx.test.runSpecE2E(wt);
+  // e2e 跑在 issue 之外（沒有 issue 層的 run 可以掛），所以沒有 live 事件
+  // 的去處 -- 不傳 onEvent，看板上這一段目前是看不到的。
+  const e2e = await ctx.test.runSpecE2E({
+    worktreePath: wt,
+    port: await allocatePort(ctx.workspace.portRangeStart, ctx.workspace.portRangeEnd),
+  });
 
   if (!e2e.pass) {
     const followups = countE2EFollowups(ctx, spec);

@@ -438,6 +438,8 @@ merge 按鈕已經是人的閘門，那些意見正好是按下去之前該讀�
 
 **loom 只保證 `PORT` 唯一，其餘隔離由專案的 script 負責。** 多個 spec 平行跑測試時，共用資源不只 port -- 本機資料庫、共用檔案、固定的瀏覽器 profile 都會互相污染。要獨立資料庫就在 `loom:setup` 裡用 `$PORT` 衍生一個名稱。隔離責任放在最清楚狀況的地方，loom 不需要理解任何專案的測試環境。真的隔離不了的專案把平行上限設 1。
 
+**實作在 `src/devserver.ts`。** 「沒有可跑的東西」（沒有 `package.json`、沒有 test/e2e script）回傳 `pass: true`，但 output 明確寫出是哪一種，並存進 `runs.summary`。這是刻意的取捨：非 Node 專案、還沒加 `loom:*` script 的專案不該讓整條流水線卡死，但也不該讓人以為測試真的跑過。跟先前那個一律回 `pass: true` 且 output 為空字串的 stub 差別就在這裡。
+
 process 生命週期不交給 LLM 的理由：agent 超時被殺、自己崩掉、忘記 kill，server 就變孤兒佔住 port，症狀出現在下一個不相干的 spec 上，而且要手動 `lsof` 才找得到。orchestrator 是唯一確定知道「這一輪結束了」的角色。
 
 ### 失敗時的資訊傳遞

@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { openDb, listWorkspaces, insertWorkspace, getWorkspace, type Workspace } from "./db.ts";
 import { createClaudeAgentRunner, DEFAULT_PROMPTS } from "./agent.ts";
+import { createDevServerTestRunner } from "./devserver.ts";
 import {
   listSpecs,
   getSpecBoardDetail,
@@ -31,18 +32,6 @@ const UI = readFileSync(new URL("./ui.html", import.meta.url), "utf8");
 // EventSource 會自己重連，前端比對這個值就知道背後換了新進程、手上這份
 // ui.html 可能過期，該重載。省掉一套獨立的 hot reload 通道。
 const BOOT_ID = randomUUID();
-
-// ponytail: 真的 dev server 生命週期（loom:test/loom:e2e、port 分配）還沒做
-// （見 DESIGN.md「dev server 生命週期」），testing 階段先全部當綠燈通過，
-// 讓 doTest 這條路徑走得通。等那塊做了在這裡換掉就好，orchestrator 不用動。
-const stubTestRunner: TestRunner = {
-  async runIssueTests() {
-    return { pass: true, output: "" };
-  },
-  async runSpecE2E() {
-    return { pass: true, output: "" };
-  },
-};
 
 interface WorkspaceHandle {
   ctx: Ctx;
@@ -87,7 +76,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       db,
       workspace,
       agent: opts.agent ?? createClaudeAgentRunner(DEFAULT_PROMPTS),
-      test: opts.test ?? stubTestRunner,
+      test: opts.test ?? createDevServerTestRunner(),
       worktreesRoot: opts.worktreesRoot,
       // 每個即時輸出事件都直接觸發 broadcast，讓「即時輸出」名副其實 --
       // board 端點本來就便宜（SQLite 查詢，沒有重運算），這個 tool call
