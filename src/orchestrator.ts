@@ -67,10 +67,15 @@ export interface AgentRequest {
   workspace: Workspace;
   spec: string;
   issue: string | null; // null 只用於 spec_reviewer
+  /** issue 檔的完整路徑，模板的 {issue_md} 從這裡讀。spec_reviewer 沒有。 */
+  issuePath?: string;
   worktreePath: string;
   attempt: number;
+  baseSha?: string | null;
   diff?: string;
   lastFailure?: string;
+  /** 這個 spec 這一輪測試分配到的 port，只有測試階段有值，模板的 {port} 用。 */
+  port?: number;
   /** 有給的話 runner 執行期間即時回呼，看板「即時輸出」用這個；不理會也不影響行為。 */
   onEvent?: (event: LiveEvent) => void;
 }
@@ -371,8 +376,10 @@ async function doImplement(ctx: Ctx, spec: string, issue: IssueFile): Promise<St
     workspace: ctx.workspace,
     spec,
     issue: issue.id,
+    issuePath: issue.path,
     worktreePath: wt,
     attempt,
+    baseSha: state.baseSha,
     lastFailure: feedbackFor(ctx, spec, issue.id),
     onEvent: live && ((event) => live.append(runId, event)),
   });
@@ -425,8 +432,10 @@ async function doIssueReview(ctx: Ctx, spec: string, issue: IssueFile): Promise<
     workspace: ctx.workspace,
     spec,
     issue: issue.id,
+    issuePath: issue.path,
     worktreePath: wt,
     attempt,
+    baseSha: state.baseSha,
     diff,
     onEvent: live && ((event) => live.append(runId, event)),
   });

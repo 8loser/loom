@@ -6,8 +6,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { openDb, listWorkspaces, insertWorkspace, getWorkspace, type Workspace } from "./db.ts";
-import { createClaudeAgentRunner, DEFAULT_PROMPTS } from "./agent.ts";
+import {
+  openDb,
+  listWorkspaces,
+  insertWorkspace,
+  getWorkspace,
+  getPrompt,
+  type Workspace,
+} from "./db.ts";
+import { createClaudeAgentRunner } from "./agent.ts";
+import { DEFAULT_TEMPLATES } from "./prompts.ts";
 import { createDevServerTestRunner } from "./devserver.ts";
 import {
   listSpecs,
@@ -75,7 +83,13 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     const ctx: Ctx = {
       db,
       workspace,
-      agent: opts.agent ?? createClaudeAgentRunner(DEFAULT_PROMPTS),
+      // 每次呼叫才讀 DB，不快取：設定頁改完模板，當前正在重試的那一輪就該
+      // 立刻吃到新版（DESIGN.md「不做版本歷史，編輯就是覆蓋」的用途正是這個）。
+      agent:
+        opts.agent ??
+        createClaudeAgentRunner({
+          templates: (workspaceId, role) => getPrompt(db, workspaceId, role) ?? DEFAULT_TEMPLATES[role],
+        }),
       test: opts.test ?? createDevServerTestRunner(),
       worktreesRoot: opts.worktreesRoot,
       // 每個即時輸出事件都直接觸發 broadcast，讓「即時輸出」名副其實 --
