@@ -74,6 +74,17 @@
     color: var(--text); cursor: pointer;
     font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px;
   }
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    appearance: none; border: 1px solid transparent; background: none; color: var(--muted);
+    padding: 4px 11px; border-radius: 3px; cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .tab:hover { color: var(--text); background: var(--surface-2); }
+  .tab[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
   .meters { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
   .meter { display: flex; align-items: baseline; gap: 6px; }
   .meter .v {
@@ -109,6 +120,8 @@
 
   /* ---------- main split ---------- */
   .main { display: grid; grid-template-columns: minmax(0, 1fr) 372px; min-height: 0; }
+  /* [hidden] 要贏過上面的 display:grid，分頁切換靠它 */
+  [hidden] { display: none !important; }
 
   /* ---------- board ---------- */
   .board { overflow: auto; min-width: 0; }
@@ -241,6 +254,59 @@
   }
   #err { color: var(--crit); font-size: 12.5px; padding: 6px 16px; min-height: 1.4em; }
 
+  /* ---------- settings ---------- */
+  .sheet { max-width: 680px; padding: 26px 24px 40px; overflow: auto; }
+  .sheet h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; text-wrap: balance; }
+  .sheet .lede { color: var(--muted); margin: 0 0 22px; max-width: 58ch; font-size: 12.5px; }
+  .sheet .grp { margin-top: 26px; }
+  .sheet .grp .label { display: block; margin-bottom: 6px; }
+  .grphd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .grphd .label { margin: 0; }
+  .grphd .aside { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+  .field {
+    display: grid; grid-template-columns: 168px 1fr; gap: 12px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  .field .in {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px; border: 1px solid var(--border-strong); border-radius: 3px;
+    padding: 5px 8px; background: var(--bg); word-break: break-all;
+  }
+  .field .in.ro { border-style: dashed; border-color: var(--border); background: transparent; color: var(--muted); }
+  .field .in.good { color: var(--ok); }
+  .field .in.warn { color: var(--warn); }
+
+  .proles { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  .prole {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--muted); border-radius: 3px; padding: 4px 10px; cursor: pointer;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11.5px;
+  }
+  .prole:hover { color: var(--text); }
+  .prole:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .prole[aria-current="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  #ptext {
+    display: block; width: 100%; box-sizing: border-box; margin: 0; resize: vertical;
+    border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg); color: var(--text);
+    padding: 11px 12px; min-height: 340px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.6;
+  }
+  .pvars {
+    margin: 8px 0 0; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .pfoot {
+    display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 11px;
+    border-top: 1px solid var(--border);
+  }
+  .pfoot .lock {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .pfoot .spacer { margin-left: auto; }
+  .pfoot .saved { font-size: 11.5px; color: var(--ok); }
+
   #picker, #newws {
     border: 1px solid var(--border-strong); border-radius: 4px; padding: 0;
     background: var(--surface); color: var(--text); width: min(560px, 90vw);
@@ -264,10 +330,11 @@
 <div class="app">
   <header class="topbar" id="topbar"></header>
   <section class="attention" id="attention"></section>
-  <div class="main">
+  <div class="main" id="pane-board">
     <div class="board"><div class="grid" id="grid"></div></div>
     <aside class="detail" id="detail"></aside>
   </div>
+  <div class="sheet" id="pane-settings" hidden></div>
 </div>
 <div id="err"></div>
 
@@ -340,6 +407,9 @@ let currentWs = null;
 let board = null; // 目前 workspace 最近一次抓到的 board 回應
 let selection = null; // {type:'spec', spec} | {type:'issue', spec, issue} | null
 let liveTimer = null;
+let tab = "board"; // 'board' | 'settings'（討論分頁還沒接，見 DESIGN.md「chat 產 spec」）
+let settings = null; // 設定分頁最近一次抓到的 /settings 與 /prompts
+let promptRole = "coder"; // 設定頁目前編輯中的角色
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -368,6 +438,12 @@ function findIssue(spec, issue) { return findSpec(spec)?.issues.find((i) => i.id
 
 function render() {
   renderTopbar();
+  $("pane-board").hidden = tab !== "board";
+  $("pane-settings").hidden = tab !== "settings";
+  $("attention").hidden = tab !== "board";
+  // 設定頁自己管重繪。這裡不碰它，否則 SSE 事件或 10 秒的保底 poll 會在
+  // 使用者編輯提示詞打到一半時把 textarea 整個換掉。
+  if (tab === "settings") return;
   renderAttention();
   renderGrid();
   renderDetail();
@@ -389,6 +465,10 @@ function renderTopbar() {
     <span class="brand">LOOM</span>
     <select id="ws-select">${opts}</select>
     <button class="btn" id="open-newws" title="新增 workspace">+</button>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="board" aria-selected="${tab === "board"}">看板</button>
+      <button class="tab" role="tab" data-tab="settings" aria-selected="${tab === "settings"}">設定</button>
+    </div>
     <div class="meters">
       <span class="meter"><span class="label">同時執行</span><span class="v">${s.runningCount} / ${ws.parallelLimit}</span></span>
       <span class="meter"><span class="label">近 24h token</span><span class="v">輸入 ${fmtTokens(s.recentInputTokens)} · 輸出 ${fmtTokens(s.recentOutputTokens)}</span></span>
@@ -396,13 +476,133 @@ function renderTopbar() {
       <span class="meter">${board.paused ? "" : '<span class="pulse" aria-hidden="true"></span>'}<span class="v">${board.paused ? "已暫停" : "執行中"}</span></span>
       <button class="btn" id="toggle-pause">${board.paused ? "繼續" : "暫停"}</button>
     </div>`;
-  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; refresh(); });
+  $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; settings = null; refresh(); });
   $("open-newws").addEventListener("click", openNewWorkspace);
+  for (const el of topbar.querySelectorAll(".tab[data-tab]")) {
+    el.addEventListener("click", () => switchTab(el.dataset.tab));
+  }
   $("toggle-pause").addEventListener("click", async () => {
     await api(`/api/workspaces/${encodeURIComponent(currentWs)}/${board.paused ? "resume" : "pause"}`, { method: "POST" });
     refresh();
   });
   if (board.error) say(`排程器上次執行時出錯：${board.error}`);
+}
+
+async function switchTab(next) {
+  tab = next;
+  if (tab === "settings" && !settings) {
+    try {
+      const base = `/api/workspaces/${encodeURIComponent(currentWs)}`;
+      const [info, prompts] = await Promise.all([api(`${base}/settings`), api(`${base}/prompts`)]);
+      settings = { ...info, roles: prompts.roles };
+      say("");
+    } catch (err) {
+      say(`讀設定失敗：${err.message}`);
+      return;
+    }
+  }
+  render();
+  if (tab === "settings") renderSettings();
+}
+
+function field(label, value, cls = "") {
+  return `<div class="field"><span class="label">${esc(label)}</span><span class="in ${cls}">${esc(value)}</span></div>`;
+}
+
+function renderSettings() {
+  const el = $("pane-settings");
+  if (!settings) { el.innerHTML = '<p class="note-run">讀取中…</p>'; return; }
+  const ws = settings.workspace;
+  const role = settings.roles.find((r) => r.role === promptRole) ?? settings.roles[0];
+
+  const scriptNames = ["loom:setup", "loom:dev", "loom:test", "loom:e2e"];
+  const scriptRows = scriptNames
+    .map((name) => field(name, settings.scripts[name] ?? "未定義", "ro"))
+    .join("");
+
+  const roleTabs = settings.roles
+    .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)
+    .join("");
+
+  el.innerHTML = `
+    <h2>${esc(ws.name)}</h2>
+    <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
+
+    ${field("專案路徑", ws.repoPath)}
+    ${field("spec 資料夾", ws.specsDir)}
+    ${field("主分支", ws.mainBranch)}
+
+    <div class="grp">
+      <div class="grphd"><span class="label">檢查項</span></div>
+      ${field("CLAUDE.md", settings.checks.claudeMd ? "找到，agent 會自動載入" : "找不到", settings.checks.claudeMd ? "ro good" : "ro warn")}
+      ${field("CONTEXT.md", settings.checks.contextMd ? "找到" : "找不到，建議先跑 /domain-modeling", settings.checks.contextMd ? "ro good" : "ro warn")}
+    </div>
+
+    <div class="grp">
+      <div class="grphd"><span class="label">讀到的指令</span><span class="aside">package.json</span></div>
+      ${scriptRows}
+    </div>
+
+    <div class="grp">
+      <div class="grphd"><span class="label">限制</span></div>
+      ${field("同時執行的 spec", String(ws.parallelLimit))}
+      ${field("連線埠範圍", `${ws.portRangeStart} – ${ws.portRangeEnd}`)}
+    </div>
+
+    <div class="grp">
+      <div class="grphd"><span class="label">提示詞</span><span class="aside">預設內容取自 mattpocock/skills，MIT</span></div>
+      <div class="proles">${roleTabs}</div>
+      <textarea id="ptext" spellcheck="false">${esc(role.template)}</textarea>
+      <p class="pvars">可用變數 ${role.variables.map((v) => `{${v}}`).join(" ")}</p>
+      <div class="pfoot">
+        <span class="lock">${role.schema ? `輸出 schema 唯讀 · {${Object.keys(role.schema.properties).join(", ")}}` : "沒有輸出 schema"}</span>
+        <span class="spacer"></span>
+        <span class="saved" id="prompt-saved"></span>
+        <button class="btn" id="prompt-reset" ${role.isDefault ? "disabled" : ""}>還原預設</button>
+        <button class="btn primary" id="prompt-save">儲存</button>
+      </div>
+    </div>`;
+
+  for (const btn of el.querySelectorAll(".prole[data-role]")) {
+    btn.addEventListener("click", () => { promptRole = btn.dataset.role; renderSettings(); });
+  }
+  $("prompt-save").addEventListener("click", () => savePrompt(role.role));
+  $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
+}
+
+async function savePrompt(role) {
+  try {
+    await api(`/api/workspaces/${encodeURIComponent(currentWs)}/prompts/${encodeURIComponent(role)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ template: $("ptext").value }),
+    });
+  } catch (err) {
+    say(`儲存提示詞失敗：${err.message}`);
+    return;
+  }
+  const entry = settings.roles.find((r) => r.role === role);
+  entry.template = $("ptext").value;
+  entry.isDefault = false;
+  renderSettings();
+  $("prompt-saved").textContent = "已儲存";
+}
+
+async function resetPrompt(role) {
+  let result;
+  try {
+    result = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/prompts/${encodeURIComponent(role)}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    say(`還原預設失敗：${err.message}`);
+    return;
+  }
+  const entry = settings.roles.find((r) => r.role === role);
+  entry.template = result.template;
+  entry.isDefault = true;
+  renderSettings();
+  $("prompt-saved").textContent = "已還原成出廠預設";
 }
 
 function renderAttention() {

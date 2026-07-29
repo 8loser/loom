@@ -7,6 +7,7 @@ import { serve, type ServerType } from "@hono/node-server";
 
 import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
 import { createServer, type LoomServer } from "./server.ts";
+import { DEFAULT_TEMPLATES } from "./prompts.ts";
 import type { AgentRunner, AgentResponse } from "./orchestrator.ts";
 
 // 只測 HTTP/SSE 這一層的接線：workspace CRUD、board 讀模型、merge/redo 動作
@@ -289,9 +290,102 @@ test("GET / serves the board page, and every endpoint that page calls is a real 
       assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);
     }
 
-    const board = await fetch(`${base}/api/workspaces/nope/board`);
-    assert.equal(board.status, 404);
-    assert.deepEqual(await board.json(), { error: "no such workspace" });
+    for (const path of ["/api/workspaces/nope/board", "/api/workspaces/nope/settings", "/api/workspaces/nope/prompts"]) {
+      const res = await fetch(`${base}${path}`);
+      assert.equal(res.status, 404, path);
+      assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);
+    }
+  } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
+test("prompts: defaults are served until edited, edits stick, reset falls back to the built-in", async () => {
+  const repoPath = initRepoWithDraftSpec();
+  const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
+  try {
+    await fetch(`${base}/api/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo-ws", repoPath }),
+    });
+
+    const initial = await (await fetch(`${base}/api/workspaces/demo-ws/prompts`)).json();
+    assert.deepEqual(
+      initial.roles.map((r: { role: string }) => r.role),
+      ["coder", "issue_reviewer", "spec_reviewer", "chat"],
+      "the settings page edits four roles",
+    );
+    const coder = initial.roles.find((r: { role: string }) => r.role === "coder");
+    assert.equal(coder.isDefault, true, "a fresh workspace has no rows in prompts, it reads the built-in");
+    assert.equal(coder.template, DEFAULT_TEMPLATES.coder);
+    assert.ok(coder.variables.includes("spec_md"));
+    assert.deepEqual(
+      Object.keys(coder.schema.properties),
+      ["done", "summary", "filesChanged"],
+      "the output schema is exposed so the page can show it read-only",
+    );
+
+    const saved = await fetch(`${base}/api/workspaces/demo-ws/prompts/coder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ template: "just do it {issue_md}" }),
+    });
+    assert.equal(saved.status, 200);
+
+    const edited = await (await fetch(`${base}/api/workspaces/demo-ws/prompts`)).json();
+    const editedCoder = edited.roles.find((r: { role: string }) => r.role === "coder");
+    assert.equal(editedCoder.template, "just do it {issue_md}");
+    assert.equal(editedCoder.isDefault, false, "the page uses this to enable 還原預設");
+
+    const reset = await fetch(`${base}/api/workspaces/demo-ws/prompts/coder`, { method: "DELETE" });
+    assert.equal((await reset.json()).template, DEFAULT_TEMPLATES.coder);
+    const afterReset = await (await fetch(`${base}/api/workspaces/demo-ws/prompts`)).json();
+    assert.equal(afterReset.roles.find((r: { role: string }) => r.role === "coder").isDefault, true);
+
+    const empty = await fetch(`${base}/api/workspaces/demo-ws/prompts/coder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ template: "   " }),
+    });
+    assert.equal(empty.status, 400, "an empty template would silently break every run");
+
+    const badRole = await fetch(`${base}/api/workspaces/demo-ws/prompts/nope`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ template: "x" }),
+    });
+    assert.equal(badRole.status, 400);
+  } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
+test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the loom:* scripts it actually read", async () => {
+  const repoPath = initRepoWithDraftSpec();
+  writeFileSync(join(repoPath, "CLAUDE.md"), "# project rules\n");
+  writeFileSync(
+    join(repoPath, "package.json"),
+    JSON.stringify({ name: "x", scripts: { "loom:dev": "vite --port $PORT", "loom:test": "vitest run", build: "tsc" } }),
+  );
+
+  const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
+  try {
+    await fetch(`${base}/api/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo-ws", repoPath }),
+    });
+
+    const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
+    assert.equal(s.workspace.repoPath, repoPath);
+    assert.equal(s.workspace.specsDir, "specs");
+    assert.deepEqual(s.checks, { claudeMd: true, contextMd: false });
+    assert.deepEqual(
+      s.scripts,
+      { "loom:dev": "vite --port $PORT", "loom:test": "vitest run" },
+      "only loom:* scripts, so the page doesn't list every script the project happens to have",
+    );
   } finally {
     await stopTestServer(loom, httpServer);
   }

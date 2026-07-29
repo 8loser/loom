@@ -12,10 +12,13 @@ import {
   insertWorkspace,
   getWorkspace,
   getPrompt,
+  getPrompts,
+  setPrompt,
+  deletePrompt,
   type Workspace,
 } from "./db.ts";
-import { createClaudeAgentRunner } from "./agent.ts";
-import { DEFAULT_TEMPLATES } from "./prompts.ts";
+import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
+import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
 import { createDevServerTestRunner } from "./devserver.ts";
 import {
   listSpecs,
@@ -152,6 +155,73 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     const workspace = getWorkspace(db, body.name)!;
     registerWorkspace(workspace);
     return c.json(workspace, 201);
+  });
+
+  // 設定頁：四個角色的模板、可用變數、唯讀的輸出 schema，以及這一份是不是
+  // 還停在出廠預設（決定「還原預設」要不要 enable）。
+  app.get("/api/workspaces/:name/prompts", (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const saved = getPrompts(db, handle.ctx.workspace.id);
+    const roles = (Object.keys(DEFAULT_TEMPLATES) as PromptRoleName[]).map((role) => ({
+      role,
+      template: saved[role] ?? DEFAULT_TEMPLATES[role],
+      isDefault: saved[role] === undefined,
+      variables: TEMPLATE_VARIABLES[role],
+      schema: ROLE_SCHEMAS[role],
+    }));
+    return c.json({ roles });
+  });
+
+  app.put("/api/workspaces/:name/prompts/:role", async (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const role = c.req.param("role") as PromptRoleName;
+    if (!(role in DEFAULT_TEMPLATES)) return c.json({ error: "no such role" }, 400);
+    const body = await c.req.json();
+    if (typeof body.template !== "string" || body.template.trim() === "") {
+      return c.json({ error: "template must be a non-empty string" }, 400);
+    }
+    setPrompt(db, handle.ctx.workspace.id, role, body.template);
+    return c.json({ ok: true });
+  });
+
+  // 還原預設 = 把那一列刪掉，讀取時自然落回內建預設，不是複製一份預設回去。
+  app.delete("/api/workspaces/:name/prompts/:role", (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const role = c.req.param("role") as PromptRoleName;
+    if (!(role in DEFAULT_TEMPLATES)) return c.json({ error: "no such role" }, 400);
+    deletePrompt(db, handle.ctx.workspace.id, role);
+    return c.json({ ok: true, template: DEFAULT_TEMPLATES[role] });
+  });
+
+  // 設定頁上半部：專案路徑、spec 資料夾、限制，加上兩個純資訊性的檢查項
+  // （DESIGN.md「不為詞彙表與規範文件開設定欄位」-- 只看有沒有，不是必填、
+  // 也不擋執行），以及從專案 package.json 實際讀到的 loom:* 指令。
+  app.get("/api/workspaces/:name/settings", (c) => {
+    const handle = handles.get(c.req.param("name"));
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const ws = handle.ctx.workspace;
+
+    let scripts: Record<string, string> = {};
+    try {
+      const pkg = JSON.parse(readFileSync(join(ws.repoPath, "package.json"), "utf8")) as {
+        scripts?: Record<string, string>;
+      };
+      scripts = Object.fromEntries(Object.entries(pkg.scripts ?? {}).filter(([k]) => k.startsWith("loom:")));
+    } catch {
+      scripts = {};
+    }
+
+    return c.json({
+      workspace: ws,
+      checks: {
+        claudeMd: existsSync(join(ws.repoPath, "CLAUDE.md")),
+        contextMd: existsSync(join(ws.repoPath, "CONTEXT.md")),
+      },
+      scripts,
+    });
   });
 
   app.get("/api/workspaces/:name/board", (c) => {
