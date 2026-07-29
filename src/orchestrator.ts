@@ -1091,6 +1091,12 @@ export interface Scheduler {
   wake(): void;
   stop(): void;
   isPaused(): boolean;
+  /**
+   * 這一刻有沒有 spec 正跑在 driveSpec 裡。改 workspace 設定時用來擋：
+   * stop() 只清 timer，跑到一半的 tick 會拿著舊的 ctx（舊 specsDir、舊
+   * mainBranch）繼續把那一輪做完，換掉 handle 攔不住它。
+   */
+  isDriving(): boolean;
   /** 上一次 tick 因未預期例外中止時的訊息；resume() 會清掉。 */
   getError(): string | null;
 }
@@ -1175,6 +1181,9 @@ export function startScheduler(
     },
     isPaused() {
       return paused;
+    },
+    isDriving() {
+      return driving;
     },
     getError() {
       return lastError;

@@ -123,75 +123,79 @@
   .btn.primary:hover { filter: brightness(1.08); color: var(--surface); }
 
   /* ---------- main split ---------- */
-  .main { display: grid; grid-template-columns: minmax(0, 1fr) 372px; min-height: 0; }
+  /* 372px 是舊看板側欄的寬度。密集清單把 issue 從卡片改成一行，省下的寬度
+     讓給 detail：即時輸出是全站密度最高、最需要寬度的區塊，之前被夾在
+     372px 裡每則訊息都要折成好幾行。 */
+  .main { display: grid; grid-template-columns: minmax(0, 1fr) 620px; min-height: 0; }
   /* [hidden] 要贏過上面的 display:grid，分頁切換靠它 */
   [hidden] { display: none !important; }
 
-  /* ---------- board ---------- */
+  /* ---------- board：密集清單 ---------- */
+  /* 舊版是 5 欄 kanban，issue 落在哪欄看狀態，經常半數欄位是空的。改成
+     一行一個 issue、狀態改用行內標籤表示，同一個 spec 底下依 id 順序（也
+     就是 DESIGN.md 說的 vertical slice 執行順序）排列，不再需要固定寬度
+     的空欄位。 */
   .board { overflow: auto; min-width: 0; }
-  .grid { display: grid; grid-template-columns: repeat(5, minmax(178px, 1fr)); min-width: 900px; }
-  /* 還沒有 workspace 時看板是空的，min-width 仍會撐出一條沒東西可捲的橫捲軸。 */
-  .grid:empty { min-width: 0; }
-  .colhead {
-    position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 9px 12px 7px;
-    border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 7px;
+  .grid { display: flex; flex-direction: column; min-width: 0; }
+
+  .a-spec {
+    display: flex; align-items: center; gap: 12px; padding: 8px 14px; box-sizing: border-box;
+    background: var(--surface-2); border-bottom: 1px solid var(--border);
+    cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; appearance: none; border-left: 0; border-right: 0; border-top: 0;
   }
-  .lane {
-    grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; width: 100%;
-    text-align: left; appearance: none; border: 0; border-bottom: 1px solid var(--border);
-    padding: 11px 12px 9px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer;
-  }
-  .lane:hover { background: var(--accent-soft); }
-  .lane.on { box-shadow: inset 2px 0 0 var(--accent); }
-  .lane.err { background: var(--crit-soft); cursor: default; }
-  .lane .name { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 600; }
-  .lane .branch { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); }
-  .lane .spacer { margin-left: auto; }
+  .a-spec:hover { background: var(--accent-soft); }
+  .a-spec.on { box-shadow: inset 2px 0 0 var(--accent); }
+  .a-spec.err { background: var(--crit-soft); cursor: default; }
+  .a-spec .nm { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 600; }
+  .a-spec .br { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); }
+  .a-spec.err .br { color: var(--crit); }
+  .a-spec .sp { margin-left: auto; }
   .prog { display: flex; align-items: center; gap: 7px; }
   .bar { width: 84px; height: 3px; background: var(--border-strong); border-radius: 2px; overflow: hidden; }
   .bar > i { display: block; height: 100%; background: var(--accent); }
   .prog .c { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-  .cell {
-    padding: 8px; display: flex; flex-direction: column; gap: 7px;
-    border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); min-height: 62px;
+  .a-row {
+    display: grid; grid-template-columns: 26px minmax(0, 1fr) 88px 200px auto;
+    gap: 12px; align-items: center; padding: 5px 14px 5px 11px;
+    border-bottom: 1px solid var(--border); border-left: 3px solid transparent; background: var(--surface);
+    cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; box-sizing: border-box;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11.5px;
   }
-  .cell:nth-child(6n + 5) { border-right: none; }
-
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-left: 2px solid var(--idle);
-    border-radius: 3px; padding: 7px 9px; display: flex; flex-direction: column; gap: 4px;
-    cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%;
+  .a-row:hover { border-left-color: var(--border-strong); background: var(--surface-2); }
+  .a-row .no { color: var(--accent); font-weight: 600; }
+  .a-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .a-row .meta {
+    color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums;
+    display: flex; gap: 8px; align-items: center; overflow: hidden;
   }
-  .card:hover { border-color: var(--border-strong); border-left-color: var(--accent); }
-  .card.live { border-left-color: var(--accent); }
-  .card.retry { border-left-color: var(--warn); }
-  .card.halted { border-left-color: var(--crit); }
-  .card.manual { border-left-color: var(--warn); border-left-style: dashed; }
-  .card.shipped { border-left-color: var(--ok); opacity: 0.72; }
-  .card.dropped { border-left-color: var(--idle); opacity: 0.55; }
-  .card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .card .id { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.35; word-break: break-word; }
-  .card .id b { color: var(--accent); font-weight: 600; }
-  .card .foot {
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+  .a-row .meta .hot { color: var(--warn); }
+  .a-row .meta .bad { color: var(--crit); }
+  .a-row .meta .good { color: var(--ok); }
+  .a-row .acts { display: flex; gap: 6px; }
+  .a-row .acts .btn { font-size: 11px; padding: 2px 8px; }
+  .st {
+    font-size: 10px; letter-spacing: 0.05em; padding: 1px 7px; text-align: center;
+    border: 1px solid currentColor; color: var(--idle); white-space: nowrap;
   }
-  .card .foot .hot { color: var(--warn); }
-  .card .foot .bad { color: var(--crit); }
-  .card .foot .good { color: var(--ok); }
-  .card .cardacts { margin-top: 2px; }
-  .card .cardacts .btn { font-size: 11px; padding: 2px 8px; }
+  .a-row.live { border-left-color: var(--accent); }
+  .a-row.live .st { color: var(--accent); }
+  .a-row.done { border-left-color: var(--ok); }
+  .a-row.done .st { color: var(--ok); }
+  .a-row.done .nm { color: var(--muted); }
+  .a-row.halt { border-left-color: var(--crit); background: var(--crit-soft); }
+  .a-row.halt .st { color: var(--crit); }
+  .a-row.manual { border-left-color: var(--warn); background: var(--warn-soft); }
+  .a-row.manual .st { color: var(--warn); }
+  .a-row.dropped { opacity: 0.55; border-left-color: var(--idle); }
+  .a-row.on { box-shadow: inset 0 0 0 1px var(--accent); }
 
   .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: beat 1.6s ease-in-out infinite; flex: none; }
   @keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
   @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
 
-  .queued { color: var(--idle); font-size: 11.5px; padding: 3px 2px; }
-
   .fold {
-    grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; width: 100%;
+    display: flex; align-items: baseline; gap: 10px; width: 100%;
     text-align: left; appearance: none; border: 0; border-bottom: 1px solid var(--border);
     background: none; cursor: pointer; padding: 10px 12px; color: var(--muted); font: inherit;
   }
@@ -210,6 +214,27 @@
     font-size: 9.5px; letter-spacing: 0.09em; padding: 1px 5px; border-radius: 2px;
     background: var(--warn-soft); color: var(--warn); flex: none;
   }
+
+  /* ---------- board：空狀態 ---------- */
+  /* loom 其他畫面都是左對齊的密集資訊，空狀態置中會變成另一種語言，
+     所以維持左對齊，只收窄行寬。 */
+  .e-note { padding: 22px; max-width: 56ch; }
+  .e-note h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  .e-note p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  .e-note .acts { display: flex; gap: 8px; }
+  .e-loading { padding: 16px 14px; color: var(--muted); font-size: 12.5px; }
+  .e-sum { padding: 14px; display: flex; flex-direction: column; gap: 20px; overflow: auto; }
+  .e-sum section > .label { display: block; margin-bottom: 8px; }
+  .e-sum .kv { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: baseline; }
+  .e-sum .kv dt { font-size: 12px; color: var(--muted); }
+  .e-sum .kv dd { margin: 0; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; }
+  .e-rows { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); }
+  .e-rows .r {
+    background: var(--surface); padding: 7px 10px; display: grid;
+    grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px;
+  }
+  .e-rows .r .m { color: var(--muted); font-variant-numeric: tabular-nums; }
 
   /* ---------- detail ---------- */
   .detail { border-left: 1px solid var(--border); background: var(--surface); min-height: 0; overflow: auto; }
@@ -261,28 +286,41 @@
   #err { color: var(--crit); font-size: 12.5px; padding: 6px 16px; min-height: 1.4em; }
 
   /* ---------- settings ---------- */
-  .sheet { max-width: 680px; padding: 26px 24px 40px; overflow: auto; }
-  .sheet h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; text-wrap: balance; }
-  .sheet .lede { color: var(--muted); margin: 0 0 22px; max-width: 58ch; font-size: 12.5px; }
-  .sheet .grp { margin-top: 26px; }
-  .sheet .grp .label { display: block; margin-bottom: 6px; }
+  /* 舊版整頁塞在 680px 的閱讀欄寬裡，右邊永遠空著。這頁只有「提示詞」
+     欄能編輯，其餘全部唯讀，所以左窄欄放唯讀狀態、右邊滿高留給提示詞
+     編輯器 -- 版面本身就說明了哪邊能改。 */
+  .sheet { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 0; }
+  .s-col { overflow: auto; border-right: 1px solid var(--border); padding: 22px 20px 40px; }
+  .s-col h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; text-wrap: balance; }
+  .s-col .lede { color: var(--muted); margin: 0 0 20px; font-size: 12px; }
+  .s-col .grp { margin-top: 22px; }
+  .s-col .grp .label { display: block; margin-bottom: 6px; }
   .grphd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
   .grphd .label { margin: 0; }
-  .grphd .aside { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+  .grphd .aside { font-size: 11px; color: var(--muted); margin-left: auto; }
   .field {
-    display: grid; grid-template-columns: 168px 1fr; gap: 12px; align-items: center;
-    padding: 8px 0; border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: baseline;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
   }
   .field .in {
     font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 12px; border: 1px solid var(--border-strong); border-radius: 3px;
-    padding: 5px 8px; background: var(--bg); word-break: break-all;
+    font-size: 11px; border: 1px solid var(--border-strong); border-radius: 3px;
+    padding: 4px 7px; background: var(--bg); word-break: break-all;
   }
   .field .in.ro { border-style: dashed; border-color: var(--border); background: transparent; color: var(--muted); }
   .field .in.good { color: var(--ok); }
   .field .in.warn { color: var(--warn); }
+  .field input.in { appearance: none; width: 100%; box-sizing: border-box; color: var(--text); }
+  .field input.in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .field .pair { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .field .pair input.in { width: 8ch; }
+  .sfoot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; }
+  .sfoot .saved { font-size: 11.5px; color: var(--ok); }
 
-  .proles { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  .s-work { overflow: hidden; display: flex; flex-direction: column; min-height: 0; padding: 22px 24px; }
+  .s-whd { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .s-whd .aside { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+  .proles { display: flex; gap: 4px; flex-wrap: wrap; }
   .prole {
     appearance: none; border: 1px solid var(--border-strong); background: var(--surface);
     color: var(--muted); border-radius: 3px; padding: 4px 10px; cursor: pointer;
@@ -292,9 +330,9 @@
   .prole:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .prole[aria-current="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
   #ptext {
-    display: block; width: 100%; box-sizing: border-box; margin: 0; resize: vertical;
+    display: block; width: 100%; box-sizing: border-box; margin: 0; resize: none; flex: 1; min-height: 0;
     border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg); color: var(--text);
-    padding: 11px 12px; min-height: 340px;
+    padding: 11px 12px;
     font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
     font-size: 12px; line-height: 1.6;
   }
@@ -415,16 +453,6 @@ const SPEC_LABEL = {
 };
 const ROLE_LABEL = { coder: "coder", issue_reviewer: "reviewer", test: "test" };
 const LIVE_KIND_LABEL = { say: "說", read: "讀取", edit: "編輯", bash: "指令", search: "搜尋", tool: "工具", port: "連線埠" };
-// blocked/human 沒有記憶「卡住前最後停在哪個 agent 階段」（front matter 只
-// 存目前狀態，不存歷史），所以一律歸類到待處理欄，靠卡片自己的樣式
-// （halted/manual）分辨，不是真的還沒開工。
-const COLUMNS = [
-  { label: "待處理", match: (i) => ["draft", "ready", "blocked", "human"].includes(i.status) },
-  { label: "實作中", match: (i) => i.status === "implementing" },
-  { label: "審查中", match: (i) => ["review_ready", "reviewing"].includes(i.status) },
-  { label: "測試中", match: (i) => ["test_ready", "testing"].includes(i.status) },
-  { label: "完成", match: (i) => ["done", "dropped"].includes(i.status) },
-];
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -468,9 +496,18 @@ async function refresh() {
   try {
     workspaces = await api("/api/workspaces");
     if (!workspaces.some((w) => w.name === currentWs)) currentWs = workspaces[0]?.name ?? null;
-    board = currentWs ? await api(`/api/workspaces/${encodeURIComponent(currentWs)}/board`) : null;
+    if (currentWs) {
+      // 還沒抓過這個 workspace 的 board 就先畫一次「讀取中」，跟抓到之後
+      // 的空清單分開，不然兩種狀態長得一模一樣。
+      if (!board) { boardLoading = true; render(); }
+      board = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/board`);
+    } else {
+      board = null;
+    }
+    boardLoading = false;
     say("");
   } catch (err) {
+    boardLoading = false;
     say(`讀看板失敗：${err.message}`);
     return;
   }
@@ -498,13 +535,16 @@ function render() {
 function renderTopbar() {
   const topbar = $("topbar");
   if (!currentWs) {
-    topbar.innerHTML = `<span class="brand">LOOM</span>
-      <button class="btn primary" id="open-newws">新增 workspace</button>`;
-    $("open-newws").addEventListener("click", openNewWorkspace);
+    // 沒有 workspace 時分頁列不存在，看板一定是唯一畫得出來的分頁，
+    // 「加一個 workspace 開始」的按鈕已經在那裡的空狀態裡，這裡不用再放一次。
+    topbar.innerHTML = `<span class="brand">LOOM</span>`;
     return;
   }
   const ws = workspaces.find((w) => w.name === currentWs);
-  const s = board.summary;
+  // 選了 workspace 但 board 還在第一次抓取（boardLoading）時，board 仍然
+  // 是 null -- 這裡要有 fallback，不能假設「有 currentWs 就有 board」。
+  const s = board?.summary ?? { runningCount: 0, recentInputTokens: 0, recentOutputTokens: 0, recentCostUsd: 0 };
+  const paused = board?.paused ?? false;
   const opts = workspaces.map((w) => `<option value="${esc(w.name)}" ${w.name === currentWs ? "selected" : ""}>${esc(w.name)}</option>`).join("");
   topbar.innerHTML = `
     <span class="brand">LOOM</span>
@@ -519,8 +559,8 @@ function renderTopbar() {
       <span class="meter"><span class="label">同時執行</span><span class="v">${s.runningCount} / ${ws.parallelLimit}</span></span>
       <span class="meter"><span class="label">近 24h token</span><span class="v">輸入 ${fmtTokens(s.recentInputTokens)} · 輸出 ${fmtTokens(s.recentOutputTokens)}</span></span>
       <span class="meter"><span class="label">近 24h 花費</span><span class="v">${fmtCost(s.recentCostUsd)}</span></span>
-      <span class="meter">${board.paused ? "" : '<span class="pulse" aria-hidden="true"></span>'}<span class="v">${board.paused ? "已暫停" : "執行中"}</span></span>
-      <button class="btn" id="toggle-pause">${board.paused ? "繼續" : "暫停"}</button>
+      <span class="meter">${paused ? "" : '<span class="pulse" aria-hidden="true"></span>'}<span class="v">${paused ? "已暫停" : "執行中"}</span></span>
+      <button class="btn" id="toggle-pause">${paused ? "繼續" : "暫停"}</button>
     </div>`;
   $("ws-select").addEventListener("change", (e) => { currentWs = e.target.value; selection = null; settings = null; chat = null; refresh(); });
   $("open-newws").addEventListener("click", openNewWorkspace);
@@ -528,10 +568,10 @@ function renderTopbar() {
     el.addEventListener("click", () => switchTab(el.dataset.tab));
   }
   $("toggle-pause").addEventListener("click", async () => {
-    await api(`/api/workspaces/${encodeURIComponent(currentWs)}/${board.paused ? "resume" : "pause"}`, { method: "POST" });
+    await api(`/api/workspaces/${encodeURIComponent(currentWs)}/${paused ? "resume" : "pause"}`, { method: "POST" });
     refresh();
   });
-  if (board.error) say(`排程器上次執行時出錯：${board.error}`);
+  if (board?.error) say(`排程器上次執行時出錯：${board.error}`);
 }
 
 async function switchTab(next) {
@@ -565,6 +605,10 @@ function field(label, value, cls = "") {
   return `<div class="field"><span class="label">${esc(label)}</span><span class="in ${cls}">${esc(value)}</span></div>`;
 }
 
+function inputField(label, id, value, attrs = "") {
+  return `<div class="field"><label class="label" for="${id}">${esc(label)}</label><input class="in" id="${id}" value="${esc(String(value))}" ${attrs}></div>`;
+}
+
 function renderSettings() {
   const el = $("pane-settings");
   if (!settings) { el.innerHTML = '<p class="note-run">讀取中…</p>'; return; }
@@ -582,34 +626,53 @@ function renderSettings() {
     .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)
     .join("");
 
+  // 左欄可編輯的只有 DB 裡那幾欄設定；虛線框的是唯讀的環境資訊（專案路徑、
+  // 檢查項、讀到的指令），外觀差異本身就說明了哪些能改，不用另外寫。
   el.innerHTML = `
-    <h2>${esc(ws.name)}</h2>
-    <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
+    <div class="s-col">
+      <h2>${esc(ws.name)}</h2>
+      <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
 
-    ${field("專案路徑", ws.repoPath)}
-    ${field("spec 資料夾", ws.specsDir)}
-    ${field("主分支", ws.mainBranch)}
+      ${field("專案路徑", ws.repoPath, "ro")}
+      ${inputField("spec 資料夾", "s-specs", ws.specsDir, 'spellcheck="false"')}
+      ${inputField("主分支", "s-branch", ws.mainBranch, 'spellcheck="false"')}
 
-    <div class="grp">
-      <div class="grphd"><span class="label">檢查項</span></div>
-      ${field("CLAUDE.md", settings.checks.claudeMd ? "找到，agent 會自動載入" : "找不到", settings.checks.claudeMd ? "ro good" : "ro warn")}
-      ${field("CONTEXT.md", settings.checks.contextMd ? "找到" : "找不到，建議先跑 /domain-modeling", settings.checks.contextMd ? "ro good" : "ro warn")}
+      <div class="grp">
+        <div class="grphd"><span class="label">限制</span></div>
+        ${inputField("同時執行", "s-parallel", ws.parallelLimit, 'type="number" min="1" max="16"')}
+        <div class="field">
+          <span class="label">連線埠</span>
+          <div class="pair">
+            <input class="in" id="s-port-start" type="number" min="1024" max="65535" value="${ws.portRangeStart}">
+            <span>-</span>
+            <input class="in" id="s-port-end" type="number" min="1024" max="65535" value="${ws.portRangeEnd}">
+          </div>
+        </div>
+      </div>
+
+      <div class="sfoot">
+        <span class="saved" id="s-saved"></span>
+        <button class="btn primary" id="s-save">儲存設定</button>
+      </div>
+
+      <div class="grp">
+        <div class="grphd"><span class="label">檢查項</span></div>
+        ${field("CLAUDE.md", settings.checks.claudeMd ? "找到，agent 會自動載入" : "找不到", settings.checks.claudeMd ? "ro good" : "ro warn")}
+        ${field("CONTEXT.md", settings.checks.contextMd ? "找到" : "找不到，建議先跑 /domain-modeling", settings.checks.contextMd ? "ro good" : "ro warn")}
+      </div>
+
+      <div class="grp">
+        <div class="grphd"><span class="label">讀到的指令</span><span class="aside">package.json</span></div>
+        ${scriptRows}
+      </div>
     </div>
 
-    <div class="grp">
-      <div class="grphd"><span class="label">讀到的指令</span><span class="aside">package.json</span></div>
-      ${scriptRows}
-    </div>
-
-    <div class="grp">
-      <div class="grphd"><span class="label">限制</span></div>
-      ${field("同時執行的 spec", String(ws.parallelLimit))}
-      ${field("連線埠範圍", `${ws.portRangeStart} - ${ws.portRangeEnd}`)}
-    </div>
-
-    <div class="grp">
-      <div class="grphd"><span class="label">提示詞</span><span class="aside">預設內容取自 mattpocock/skills，MIT</span></div>
-      <div class="proles">${roleTabs}</div>
+    <div class="s-work">
+      <div class="s-whd">
+        <span class="label">提示詞</span>
+        <div class="proles">${roleTabs}</div>
+        <span class="aside">預設內容取自 mattpocock/skills，MIT</span>
+      </div>
       <textarea id="ptext" spellcheck="false">${esc(role.template)}</textarea>
       <p class="pvars">可用變數 ${role.variables.map((v) => `{${v}}`).join(" ")}</p>
       <div class="pfoot">
@@ -626,6 +689,42 @@ function renderSettings() {
   }
   $("prompt-save").addEventListener("click", () => savePrompt(role.role));
   $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
+  $("s-save").addEventListener("click", saveSettings);
+}
+
+/**
+ * 改 spec 資料夾等於換掉整個看板的來源：舊資料夾裡的 spec 不再出現，DB 裡
+ * 那些 issue 的重試計數、base_sha 仍以 spec 名為 key -- 新資料夾有同名 spec
+ * 會沿用到舊紀錄。所以存檔前問一次，只在真的改了那一欄時問。
+ */
+async function saveSettings() {
+  const specsDir = $("s-specs").value.trim();
+  if (specsDir !== settings.workspace.specsDir &&
+      !confirm(`spec 資料夾改成 ${specsDir} 之後，看板只會列這個資料夾底下的 spec。舊資料夾裡的不會被刪，但也不再顯示或執行。要改嗎？`)) {
+    return;
+  }
+  let workspace;
+  try {
+    workspace = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        specsDir,
+        mainBranch: $("s-branch").value.trim(),
+        parallelLimit: Number($("s-parallel").value),
+        portRangeStart: Number($("s-port-start").value),
+        portRangeEnd: Number($("s-port-end").value),
+      }),
+    });
+  } catch (err) {
+    say(`設定儲存失敗：${err.message}`);
+    return;
+  }
+  settings.workspace = workspace;
+  say("");
+  renderSettings();
+  $("s-saved").textContent = "已儲存";
+  refresh(); // 換了 spec 資料夾之後看板要立刻跟著換，不等下一個 SSE 事件
 }
 
 /** 存檔與還原是同一個形狀：打一次 API，用結果更新本地那筆，重繪，報一句。 */
@@ -760,53 +859,60 @@ function renderAttention() {
   el.innerHTML = banners.join("");
 }
 
-function issueCard(spec, issue) {
-  const classes = ["card"];
+// 一行一個 issue，狀態靠這裡算出的文字標籤表示（ISSUE_LABEL），不再靠
+// 卡片落在哪個欄位表示。live/blocked/human/done/dropped 的判斷跟旗標
+// 內容跟舊版 issueCard 完全一樣，只是把卡片的多行版面改成一行的 grid。
+function issueRow(spec, issue) {
+  const classes = ["a-row"];
   const live = spec.currentIssue && spec.currentIssue.id === issue.id ? spec.currentIssue : null;
   if (live) classes.push("live");
-  if (live && live.attempt > 1) classes.push("retry");
-  if (issue.status === "blocked") classes.push("halted");
+  if (issue.status === "blocked") classes.push("halt");
   if (issue.status === "human") classes.push("manual");
-  if (issue.status === "done") classes.push("shipped");
+  if (issue.status === "done") classes.push("done");
   if (issue.status === "dropped") classes.push("dropped");
   if (selection?.type === "issue" && selection.spec === spec.spec && selection.issue === issue.id) classes.push("on");
 
-  const idLine = `<span class="id"><b>${esc(issue.id)}</b> ${esc(issue.title)}</span>`;
   const e2eTag = issue.e2e ? '<span class="e2e">E2E</span>' : "";
-  let foot = "";
+  let badge = esc(ISSUE_LABEL[issue.status] ?? issue.status);
+  let meta = "";
   let acts = "";
 
   if (live) {
+    badge = esc(ROLE_LABEL[live.role] ?? live.role);
     const attempt = live.attempt > 1 ? `<span class="hot">第 ${live.attempt} / ${spec.domainMaxAttempts} 次</span>` : "";
     const diff = live.diffStat ? `<span><span style="color:var(--ok)">+${live.diffStat.insertions}</span> <span style="color:var(--crit)">-${live.diffStat.deletions}</span></span>` : "";
-    foot = `<span class="foot"><span class="pulse" aria-hidden="true"></span>
-      <span>${esc(ROLE_LABEL[live.role] ?? live.role)}</span>
+    meta = `<span class="pulse" aria-hidden="true"></span>
       <span class="live-elapsed" data-since="${live.startedAt}">${fmtElapsed(Date.now() - live.startedAt)}</span>
-      ${attempt}${diff}${e2eTag}</span>`;
+      ${attempt}${diff}${e2eTag}`;
   } else if (issue.status === "blocked") {
     const r = spec.issueRetries[issue.id];
     const label = r ? `${r.domain} / ${spec.domainMaxAttempts} 次未通過` : "未通過";
-    foot = `<span class="foot"><span class="bad">${esc(label)}</span>${e2eTag}</span>`;
+    meta = `<span class="bad">${esc(label)}</span>${e2eTag}`;
   } else if (issue.status === "human") {
-    foot = `<span class="foot"><span class="hot">等你動手</span>${e2eTag}</span>
-      <span class="foot cardacts"><button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">退回 ready</button></span>`;
+    meta = `<span class="hot">等你動手</span>${e2eTag}`;
+    acts = `<button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">退回 ready</button>`;
   } else if (issue.status === "done") {
     const staleTag = issue.stale ? '<span class="hot">來源已變更</span>' : "";
     const e2ePass = issue.e2e ? '<span class="good">e2e 通過</span>' : "";
-    foot = staleTag || e2ePass ? `<span class="foot">${staleTag}${e2ePass}</span>` : "";
-    if (issue.stale) acts = `<span class="foot cardacts">
+    meta = `${staleTag}${e2ePass}`;
+    if (issue.stale) acts = `
       <button class="btn" data-act="redo" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">重做</button>
-      <button class="btn" data-act="acknowledge-stale" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">忽略變更</button>
-    </span>`;
-  } else if (issue.status === "dropped") {
-    foot = '<span class="foot">已捨棄</span>';
+      <button class="btn" data-act="acknowledge-stale" data-spec="${esc(spec.spec)}" data-issue="${esc(issue.id)}">忽略變更</button>`;
   } else if (e2eTag) {
-    foot = `<span class="foot">${e2eTag}</span>`;
+    meta = e2eTag;
   }
 
+  // 這裡不能用 <button>：human/stale 狀態要在同一行裡再放一顆真正的
+  // <button data-act>，button 不能巢狀。跟舊版 issueCard 一樣用
+  // role="button" 的 div。
   const title = spec.issueFailures[issue.id] ? ` title="${esc(spec.issueFailures[issue.id])}"` : "";
   return `<div class="${classes.join(" ")}" tabindex="0" role="button" data-issue="${esc(issue.id)}" data-spec="${esc(spec.spec)}"${title}>
-    ${idLine}${foot}${acts}</div>`;
+    <span class="no">${esc(issue.id)}</span>
+    <span class="nm">${esc(issue.title)}</span>
+    <span class="st">${badge}</span>
+    <span class="meta">${meta}</span>
+    <span class="acts">${acts}</span>
+  </div>`;
 }
 
 function laneProgress(spec) {
@@ -828,8 +934,30 @@ function laneProgress(spec) {
   </span>`;
 }
 
+// 讀取中跟「真的沒有 spec」是兩種不同狀態，boardLoading 只在還沒抓到過
+// 這個 workspace 的第一份 board 資料時是 true，抓到之後（就算是空的）就
+// 一直是 false，不會因為 poll 或切分頁又跳回讀取中。
+let boardLoading = false;
+
+function emptyNote(title, body, ctaLabel, ctaId) {
+  return `<div class="e-note">
+    <h3>${esc(title)}</h3>
+    <p>${body}</p>
+    <div class="acts"><button class="btn primary" id="${ctaId}">${esc(ctaLabel)}</button></div>
+  </div>`;
+}
+
 function renderGrid() {
   const grid = $("grid");
+  if (!currentWs) {
+    grid.innerHTML = emptyNote(
+      "加一個 workspace 開始",
+      "loom 要一個 git repo，加上 repo 裡放 spec 的資料夾。執行時它在獨立的 worktree 裡跑 agent，不動你的工作目錄。",
+      "選一個 repo 資料夾", "e-open-newws");
+    $("e-open-newws").addEventListener("click", openNewWorkspace);
+    return;
+  }
+  if (boardLoading) { grid.innerHTML = '<div class="e-loading">讀取中…</div>'; return; }
   if (!board) { grid.innerHTML = ""; return; }
 
   const drafts = board.specs.filter((s) => s.status === "draft");
@@ -837,36 +965,46 @@ function renderGrid() {
   const importNeeded = board.specs.filter((s) => s.status === "import_needed");
   const active = board.specs.filter((s) => !["draft", "merged", "import_needed"].includes(s.status));
 
-  const head = COLUMNS.map((c) => `<div class="colhead"><span class="label">${c.label}</span></div>`).join("");
+  const errRows = importNeeded.map((spec) => `
+    <div class="a-spec err">
+      <span class="nm">${esc(spec.spec)}</span>
+      <span class="br">需匯入 · ${esc(spec.error ?? "")}</span>
+    </div>`).join("");
 
-  const lanes = active.map((spec) => {
-    const laneClass = selection?.type === "spec" && selection.spec === spec.spec ? "lane on" : "lane";
-    const lane = `<button class="${laneClass}" type="button" data-spec="${esc(spec.spec)}">
-      <span class="name">${esc(spec.spec)}</span>
-      <span class="branch">${esc(spec.branch)}</span>
-      <span class="spacer"></span>
+  const specRows = active.map((spec) => {
+    const specClass = selection?.type === "spec" && selection.spec === spec.spec ? "a-spec on" : "a-spec";
+    const header = `<button class="${specClass}" type="button" data-spec="${esc(spec.spec)}">
+      <span class="nm">${esc(spec.spec)}</span>
+      <span class="br">${esc(spec.branch)}</span>
+      <span class="sp"></span>
       ${laneProgress(spec)}
     </button>`;
-    const cells = COLUMNS.map((col) => {
-      const cards = spec.issues.filter(col.match).map((i) => issueCard(spec, i)).join("");
-      return `<div class="cell">${cards}</div>`;
-    }).join("");
-    return lane + cells;
+    // 依 id 排序，就是 DESIGN.md 說的 vertical slice 執行順序，比照舊看板
+    // 用完成/實作中/待處理分欄的視覺分組更直接看出「接下來輪到誰」。
+    const rows = [...spec.issues]
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map((i) => issueRow(spec, i))
+      .join("");
+    return header + rows;
   }).join("");
-
-  const errLanes = importNeeded.map((spec) => `
-    <div class="lane err">
-      <span class="name">${esc(spec.spec)}</span>
-      <span class="branch">需匯入 -- ${esc(spec.error ?? "")}</span>
-    </div>`).join("");
 
   const foldRow = (label, list) => list.length ? `<button class="fold" type="button">
       <span class="tw" aria-hidden="true">▸</span>
       <span class="ttl">${label} ${list.length}</span>
       <span class="names">${list.map((s) => esc(s.spec)).join(" · ")}</span>
     </button>` : "";
+  const folds = foldRow("草稿", drafts) + foldRow("已合併", mergedList);
 
-  grid.innerHTML = head + errLanes + lanes + foldRow("草稿", drafts) + foldRow("已合併", mergedList);
+  let empty = "";
+  if (board.specs.length === 0) {
+    empty = emptyNote("還沒有 spec", "到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>specs/ 裡已經有手寫的 spec 資料夾的話，loom 會掃到並標成需匯入。", "去討論", "e-goto-chat");
+  } else if (active.length === 0) {
+    empty = emptyNote("沒有進行中的 spec", "全部是草稿或已合併。定稿之後才會開始跑。", "去討論", "e-goto-chat");
+  }
+
+  grid.innerHTML = errRows + specRows + empty + folds;
+  const gotoChat = $("e-goto-chat");
+  if (gotoChat) gotoChat.addEventListener("click", () => switchTab("chat"));
 }
 
 function specFacts(spec) {
@@ -958,9 +1096,52 @@ function renderLiveStream(live) {
   </div>`;
 }
 
+// 沒有選取任何 spec/issue 時，620px 的 detail 欄不留白：放這個 workspace
+// 的基本資訊，加上正在跑的 issue 清單（跟 topbar 的「同時執行 n/m」同一份
+// board.summary，只是這裡列得出是哪幾個）。board.summary 目前只有花費和
+// token 兩項數字，沒有「今天完成幾個」「昨晚跑完的」這類需要完成時間戳記
+// 的欄位 -- 那些要後端多存資料，這裡不無中生有。
+function renderBoardSummary() {
+  const ws = workspaces.find((w) => w.name === currentWs);
+  const s = board.summary;
+  const running = board.specs.filter((sp) => sp.currentIssue);
+
+  const wsSection = ws ? `<section>
+      <span class="label">這個 workspace</span>
+      <dl class="kv">
+        <dt>專案路徑</dt><dd>${esc(ws.repoPath)}</dd>
+        <dt>spec 資料夾</dt><dd>${esc(ws.specsDir)}</dd>
+        <dt>主分支</dt><dd>${esc(ws.mainBranch)}</dd>
+      </dl>
+    </section>` : "";
+
+  const runningRows = running.map((sp) => {
+    const live = sp.currentIssue;
+    const title = sp.issues.find((i) => i.id === live.id)?.title ?? "";
+    return `<div class="r">
+      <span>${esc(live.id)} ${esc(title)} <span style="color:var(--muted)">· ${esc(sp.spec)}</span></span>
+      <span class="m">${esc(ROLE_LABEL[live.role] ?? live.role)} · <span class="live-elapsed" data-since="${live.startedAt}">${fmtElapsed(Date.now() - live.startedAt)}</span></span>
+    </div>`;
+  }).join("");
+  const runningSection = running.length
+    ? `<section><span class="label">執行中 ${running.length}</span><div class="e-rows">${runningRows}</div></section>`
+    : "";
+
+  const todaySection = `<section>
+      <span class="label">今天</span>
+      <dl class="kv">
+        <dt>花費</dt><dd>${fmtCost(s.recentCostUsd)}</dd>
+        <dt>Token</dt><dd>輸入 ${fmtTokens(s.recentInputTokens)} · 輸出 ${fmtTokens(s.recentOutputTokens)}</dd>
+      </dl>
+    </section>`;
+
+  return `<div class="e-sum">${wsSection}${runningSection}${todaySection}</div>`;
+}
+
 function renderDetail() {
   const el = $("detail");
-  if (!board || !selection) { el.innerHTML = '<p class="note-run">選一個 spec 或 issue 看詳情。</p>'; return; }
+  if (boardLoading || !board) { el.innerHTML = ""; return; }
+  if (!selection) { el.innerHTML = renderBoardSummary(); return; }
   if (selection.type === "spec") {
     const spec = findSpec(selection.spec);
     el.innerHTML = spec ? renderSpecDetail(spec) : '<p class="note-run">這個 spec 不見了。</p>';
@@ -1077,11 +1258,11 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
-  const lane = e.target.closest(".lane[data-spec]");
-  if (lane) { selection = { type: "spec", spec: lane.dataset.spec }; render(); return; }
+  const specHeader = e.target.closest(".a-spec[data-spec]");
+  if (specHeader) { selection = { type: "spec", spec: specHeader.dataset.spec }; render(); return; }
 
-  const card = e.target.closest(".card[data-issue]");
-  if (card) { selection = { type: "issue", spec: card.dataset.spec, issue: card.dataset.issue }; render(); return; }
+  const row = e.target.closest(".a-row[data-issue]");
+  if (row) { selection = { type: "issue", spec: row.dataset.spec, issue: row.dataset.issue }; render(); return; }
 });
 
 const events = new EventSource("/api/events");
