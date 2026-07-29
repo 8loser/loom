@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { RunUsage } from "./db.ts";
 
@@ -31,13 +32,16 @@ interface RateLimitEvent {
   rate_limit_info: { status: string; overageStatus?: string; isUsingOverage?: boolean };
 }
 
-type StreamEvent = ResultEvent | RateLimitEvent | { type: string; [k: string]: unknown };
+export type StreamEvent = ResultEvent | RateLimitEvent | { type: string; [k: string]: unknown };
 
 // 看板「即時輸出」用的事件粒度：一個 assistant 內容區塊一筆，不追蹤
 // token-level 的 partial delta（沒帶 --include-partial-messages），也不等
 // tool_result 回來 -- 呼叫本身發生的當下就夠讓人看懂 agent 在幹嘛，等結果
 // 只是多一層狀態要追蹤（tool_use_id 對應），換不到看板需要的東西。
-export type LiveEventKind = "say" | "read" | "edit" | "bash" | "search" | "tool";
+// "port" 不是 claude 產生的，是 devserver.ts 起 dev server 時發的（看板要顯示
+// 「連線埠」欄位）。共用同一條管線是因為它跟工具呼叫一樣是「這一輪 run 期間
+// 發生的事」，另外拉一條 store 只為了一個數字不划算。
+export type LiveEventKind = "say" | "read" | "edit" | "bash" | "search" | "tool" | "port";
 
 export interface LiveEvent {
   at: number;
@@ -90,22 +94,31 @@ const USAGE_EXHAUSTION_MARKERS = [
   "out_of_credits",
 ];
 
-// rate_limit_event 只出現在 --output-format json 印整條事件陣列的那個
-// 形狀（不帶隔離 flag 時）。production 實際用的 flag 組合下只印最後的
-// result 物件，這個函式在那種情況下永遠找不到東西 -- 用量用盡的判定因此
-// 實務上全靠 result.is_error + 字串比對那條路徑，不是 rate_limit_event。
+// 只看 status。實測（claude 2.1.220，stream-json）一次完全成功的呼叫長這樣：
+//
+//   { status: "allowed", rateLimitType: "five_hour", resetsAt: ...,
+//     overageStatus: "rejected", overageDisabledReason: "out_of_credits",
+//     isUsingOverage: false }
+//
+// overageStatus:"rejected" 只代表這個帳號沒有開啟超額付費，是常態設定，跟
+// 用量用不用得完無關 -- 曾經把它當成判定條件，結果是每一次呼叫都被判成用量
+// 用盡。--output-format json 的路徑看不到 rate_limit_event 所以沒事，一改用
+// stream-json 就會讓整個 orchestrator 在第一次呼叫就停住（DESIGN.md「誤判成
+// 用量用盡會讓整個 orchestrator 白白停住」講的正是這個）。
+//
+// 真的撞到上限時 status 會是什麼值還沒有樣本，所以維持保守預設：判不出來就
+// 讓它走 infra_fail（重試三次），不是 usage_exhausted（整條停住）。
 function classifyRateLimitEvents(events: StreamEvent[]): boolean {
   return events.some((e) => {
     if (e.type !== "rate_limit_event") return false;
-    const info = (e as RateLimitEvent).rate_limit_info;
-    return info.status !== "allowed" || info.overageStatus === "rejected";
+    return (e as RateLimitEvent).rate_limit_info.status !== "allowed";
   });
 }
 
 // 兩個 spawn 路徑（一次性 JSON / 逐行 stream-json）跑完都會走到「有沒有
 // result 事件」這個判斷 -- 抽出來共用，不是各自重寫一遍用量用盡/is_error/
 // schema 缺漏這三條規則。
-function decideOutcome(events: StreamEvent[], jsonSchema: object | undefined): ClaudeRunResult | null {
+export function decideOutcome(events: StreamEvent[], jsonSchema: object | undefined): ClaudeRunResult | null {
   const result = events.find((e): e is ResultEvent => e.type === "result");
   if (!result) return null;
 
@@ -244,9 +257,12 @@ function runClaudeBuffered(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
   });
 }
 
+// 實測確認 Read/Edit/Write 的 file_path 是絕對路徑，看板顯示成相對於
+// worktree 比較好讀。resolve 是因為呼叫端不保證給絕對路徑（測試會給相對）。
 function relPath(cwd: string, p: unknown): string {
   if (typeof p !== "string") return String(p ?? "");
-  return p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
+  const base = resolve(cwd);
+  return p.startsWith(base + "/") ? p.slice(base.length + 1) : p;
 }
 
 // ponytail: Edit/Write 只顯示檔名，不算真的 +/- 行數（要嘛自己實作 diff
@@ -273,6 +289,12 @@ function describeToolUse(cwd: string, name: string, input: Record<string, unknow
   }
 }
 
+// --json-schema 會強迫 agent 呼叫這個工具回報結果。它是 loom 自己要求的，
+// 不是 agent 在做事，出現在即時輸出上只是雜訊（而且會把 structured output
+// 的完整內容洩到看板上）。thinking 區塊同理不轉發：內容常常是空的，而且那
+// 不是「做了什麼」。
+const REPORTING_TOOL = "StructuredOutput";
+
 function emitLiveEvents(cwd: string, message: unknown, onEvent: (event: LiveEvent) => void): void {
   const content = (message as { content?: unknown } | null)?.content;
   if (!Array.isArray(content)) return;
@@ -282,7 +304,7 @@ function emitLiveEvents(cwd: string, message: unknown, onEvent: (event: LiveEven
     const b = block as { type?: string; text?: string; name?: string; input?: Record<string, unknown> };
     if (b.type === "text" && b.text) {
       onEvent({ at, kind: "say", text: b.text });
-    } else if (b.type === "tool_use" && b.name) {
+    } else if (b.type === "tool_use" && b.name && b.name !== REPORTING_TOOL) {
       onEvent({ at, ...describeToolUse(cwd, b.name, b.input ?? {}) });
     }
   }

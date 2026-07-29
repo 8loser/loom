@@ -492,7 +492,17 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 
 預設仍是 `--output-format json`（一次性拿完整結果）；`runClaude()` 另外加了一條 `--output-format stream-json` 逐行解析的路徑，只在呼叫端給了 `onEvent` 回呼時啟用（見「觀測」一節），沒給就完全走原本的路徑，兩者共用同一套 result 事件判讀邏輯。
 
-**實測到一個非文件記載的行為，寫下來省得下次重踩：** `--output-format json` 的輸出形狀不是恆定的。不帶隔離 flag（`--setting-sources`/`--strict-mcp-config`/`--disable-slash-commands`/`--permission-mode`）時印整條 session 的事件陣列；production 實際用的 flag 組合下，只印最後那個 `result` 事件本身，不包陣列。`src/claude.ts` 兩種都處理（`Array.isArray` 判斷），但這代表 `rate_limit_event`（本來想拿來當用量用盡的判定依據）在 production 的 flag 組合下永遠看不到 -- 那個判定實務上全靠 `result.is_error` 加字串比對這條路徑，不是 `rate_limit_event`。
+**實測到一個非文件記載的行為，寫下來省得下次重踩：** `--output-format json` 的輸出形狀不是恆定的。不帶隔離 flag（`--setting-sources`/`--strict-mcp-config`/`--disable-slash-commands`/`--permission-mode`）時印整條 session 的事件陣列；production 實際用的 flag 組合下，只印最後那個 `result` 事件本身，不包陣列。`src/claude.ts` 兩種都處理（`Array.isArray` 判斷）。
+
+**`rate_limit_event` 的 `overageStatus` 不是用量用盡的判定依據。** 實測（2.1.220，stream-json）一次完全成功的呼叫會帶：
+
+```json
+{ "status": "allowed", "rateLimitType": "five_hour", "resetsAt": 1785313200,
+  "overageStatus": "rejected", "overageDisabledReason": "out_of_credits",
+  "isUsingOverage": false }
+```
+
+`overageStatus: "rejected"` 只代表這個帳號沒開啟超額付費，是常態設定。曾經把它當成判定條件，在 `--output-format json` 的路徑下沒有症狀（那條路徑看不到 `rate_limit_event`），但一改用 stream-json 就變成每一次呼叫都被判成用量用盡、orchestrator 第一次呼叫就停住。判定只看 `status`。真的撞到上限時 `status` 會是什麼值還沒有樣本，所以維持保守預設：判不出來走 `infra_fail`（重試三次），不是 `usage_exhausted`（整條停住）。
 
 ### agent 繼承什麼環境
 
@@ -636,7 +646,11 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 
 **完整輸出不落地。** 一個 issue 的 stream-json 可能幾 MB，乘上 issue 數與重試次數會把 DB 撐爆。只存摘要（耗時、成本、files_changed、verdict），失敗時才存完整 stdout，那時才需要它。
 
-**實作現況（coder / issue_reviewer 兩個角色）：** `claude.ts` 的 `runClaude` 有給 `onEvent` 才切換成 `--output-format stream-json --verbose` 逐行解析，沒給就維持既有的 `--output-format json` 一次性路徑，行為不變。事件粒度是「一個 assistant 內容區塊」，不追蹤 token-level 的 partial delta、不等 tool_result 回來（那些只換得到 tool_use_id 對應的額外狀態，換不到「看得懂 agent 在幹嘛」這個目標）。orchestrator 用一個純記憶體的 `LiveOutputStore`（key 是 run id）暫存，run 一結束就 `clear()`，完全不落地，跟上面「完整輸出不落地」一致。spec_reviewer 沒有接（issue 是 null，看板目前沒有它的顯示位置，接了也沒地方放）。stream-json 的事件形狀是查官方文件（code.claude.com/docs）確認的，不是像 `--output-format json` 那樣實測過 -- 沙盒環境擋掉了直接呼叫 `claude -p --output-format stream-json` 驗證，等哪次真的跑到位置不對再回來修 `claude.ts` 的 `emitLiveEvents`。
+**實作現況：** `claude.ts` 的 `runClaude` 有給 `onEvent` 才切換成 `--output-format stream-json --verbose` 逐行解析，沒給就維持既有的 `--output-format json` 一次性路徑，行為不變。事件粒度是「一個 assistant 內容區塊」，不追蹤 token-level 的 partial delta、不等 tool_result 回來（那些只換得到 tool_use_id 對應的額外狀態，換不到「看得懂 agent 在幹嘛」這個目標）。orchestrator 用一個純記憶體的 `LiveOutputStore`（key 是 run id）暫存，run 一結束就 `clear()`，完全不落地，跟上面「完整輸出不落地」一致。
+
+接上的有 coder、issue_reviewer、以及測試階段的 `loom:*` 指令（`devserver.ts` 透過同一條管線報 `kind:"port"` 與跑了哪個 script）。spec_reviewer 與 spec 層的 e2e 沒接：它們的 issue 是 null，看板目前沒有它們的顯示位置。
+
+**事件形狀已實測**（`claude-stream.test.ts`，預設 SKIP，`ORC_TEST_REAL_CLAUDE=1` 才跑）：`assistant` 事件的 `message.content[]` 會有 `thinking` / `text` / `tool_use` 三種區塊，工具名稱就是 `Read`、`Edit`、`Bash` 這些原名，`Read` 的 `input.file_path` 是絕對路徑。`--json-schema` 強迫呼叫的 `StructuredOutput` 也會以 `tool_use` 出現，那是 loom 自己要求的回報動作不是 agent 在做事，轉發時濾掉。
 
 ### 用量與花費
 
