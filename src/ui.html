@@ -310,6 +310,12 @@
   .field .in.ro { border-style: dashed; border-color: var(--border); background: transparent; color: var(--muted); }
   .field .in.good { color: var(--ok); }
   .field .in.warn { color: var(--warn); }
+  .field input.in { appearance: none; width: 100%; box-sizing: border-box; color: var(--text); }
+  .field input.in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .field .pair { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .field .pair input.in { width: 8ch; }
+  .sfoot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; }
+  .sfoot .saved { font-size: 11.5px; color: var(--ok); }
 
   .s-work { overflow: hidden; display: flex; flex-direction: column; min-height: 0; padding: 22px 24px; }
   .s-whd { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -599,6 +605,10 @@ function field(label, value, cls = "") {
   return `<div class="field"><span class="label">${esc(label)}</span><span class="in ${cls}">${esc(value)}</span></div>`;
 }
 
+function inputField(label, id, value, attrs = "") {
+  return `<div class="field"><label class="label" for="${id}">${esc(label)}</label><input class="in" id="${id}" value="${esc(String(value))}" ${attrs}></div>`;
+}
+
 function renderSettings() {
   const el = $("pane-settings");
   if (!settings) { el.innerHTML = '<p class="note-run">讀取中…</p>'; return; }
@@ -616,16 +626,34 @@ function renderSettings() {
     .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)
     .join("");
 
-  // 左欄全部唯讀，只用來讓你核對環境；右欄的提示詞編輯器是這頁唯一能改
-  // 的東西，版面本身就說明了這件事，不用另外寫「這裡不能編輯」。
+  // 左欄可編輯的只有 DB 裡那幾欄設定；虛線框的是唯讀的環境資訊（專案路徑、
+  // 檢查項、讀到的指令），外觀差異本身就說明了哪些能改，不用另外寫。
   el.innerHTML = `
     <div class="s-col">
       <h2>${esc(ws.name)}</h2>
       <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
 
-      ${field("專案路徑", ws.repoPath)}
-      ${field("spec 資料夾", ws.specsDir)}
-      ${field("主分支", ws.mainBranch)}
+      ${field("專案路徑", ws.repoPath, "ro")}
+      ${inputField("spec 資料夾", "s-specs", ws.specsDir, 'spellcheck="false"')}
+      ${inputField("主分支", "s-branch", ws.mainBranch, 'spellcheck="false"')}
+
+      <div class="grp">
+        <div class="grphd"><span class="label">限制</span></div>
+        ${inputField("同時執行", "s-parallel", ws.parallelLimit, 'type="number" min="1" max="16"')}
+        <div class="field">
+          <span class="label">連線埠</span>
+          <div class="pair">
+            <input class="in" id="s-port-start" type="number" min="1024" max="65535" value="${ws.portRangeStart}">
+            <span>-</span>
+            <input class="in" id="s-port-end" type="number" min="1024" max="65535" value="${ws.portRangeEnd}">
+          </div>
+        </div>
+      </div>
+
+      <div class="sfoot">
+        <span class="saved" id="s-saved"></span>
+        <button class="btn primary" id="s-save">儲存設定</button>
+      </div>
 
       <div class="grp">
         <div class="grphd"><span class="label">檢查項</span></div>
@@ -636,12 +664,6 @@ function renderSettings() {
       <div class="grp">
         <div class="grphd"><span class="label">讀到的指令</span><span class="aside">package.json</span></div>
         ${scriptRows}
-      </div>
-
-      <div class="grp">
-        <div class="grphd"><span class="label">限制</span></div>
-        ${field("同時執行", String(ws.parallelLimit))}
-        ${field("連線埠", `${ws.portRangeStart} - ${ws.portRangeEnd}`)}
       </div>
     </div>
 
@@ -667,6 +689,42 @@ function renderSettings() {
   }
   $("prompt-save").addEventListener("click", () => savePrompt(role.role));
   $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
+  $("s-save").addEventListener("click", saveSettings);
+}
+
+/**
+ * 改 spec 資料夾等於換掉整個看板的來源：舊資料夾裡的 spec 不再出現，DB 裡
+ * 那些 issue 的重試計數、base_sha 仍以 spec 名為 key -- 新資料夾有同名 spec
+ * 會沿用到舊紀錄。所以存檔前問一次，只在真的改了那一欄時問。
+ */
+async function saveSettings() {
+  const specsDir = $("s-specs").value.trim();
+  if (specsDir !== settings.workspace.specsDir &&
+      !confirm(`spec 資料夾改成 ${specsDir} 之後，看板只會列這個資料夾底下的 spec。舊資料夾裡的不會被刪，但也不再顯示或執行。要改嗎？`)) {
+    return;
+  }
+  let workspace;
+  try {
+    workspace = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        specsDir,
+        mainBranch: $("s-branch").value.trim(),
+        parallelLimit: Number($("s-parallel").value),
+        portRangeStart: Number($("s-port-start").value),
+        portRangeEnd: Number($("s-port-end").value),
+      }),
+    });
+  } catch (err) {
+    say(`設定儲存失敗：${err.message}`);
+    return;
+  }
+  settings.workspace = workspace;
+  say("");
+  renderSettings();
+  $("s-saved").textContent = "已儲存";
+  refresh(); // 換了 spec 資料夾之後看板要立刻跟著換，不等下一個 SSE 事件
 }
 
 /** 存檔與還原是同一個形狀：打一次 API，用結果更新本地那筆，重繪，報一句。 */

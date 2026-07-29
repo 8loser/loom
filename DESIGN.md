@@ -579,6 +579,14 @@ SQLite 存兩類東西：
 
 執行指令不存在設定裡，見下節。
 
+**`name` 與 `repo_path` 建立後不可改。** `name` 是 handle 的 key，也是 worktree 路徑（`~/.loom/worktrees/<workspace>/`）的一段；`repo_path` 換掉等於換一個專案，而 `runs`、`issue_state`、`spec_state` 全都掛在同一個 `workspace_id` 上。那兩件事該是新增一個 workspace，不是編輯這一個。
+
+**改設定要等當前那一輪跑完（`PUT /settings` 回 409）。** `ctx.workspace` 是註冊當下的快照，所以存檔後整個 handle 換掉：舊排程器 `stop()`、用新的 workspace 重新 `registerWorkspace`，暫停狀態跟著搬過去。但 `stop()` 只清 timer -- 正在 `await` 的 `driveSpec` 攔不住，它會拿著舊的 `specs_dir` 把 spec.md、issue 檔、狀態 commit 寫完。那些寫入會落在舊資料夾，跟剛存下去的設定對不上。所以有東西在跑時直接拒絕，不做中止：中止一個跑到一半的 coder 要處理 worktree 殘留與半完成的 commit，比「等它跑完」貴得多。
+
+**改 `specs_dir` 不搬資料、不改 DB。** 舊資料夾裡的 spec 留在原地，只是看板不再列、排程器不再跑。DB 裡的 `issue_state`、`spec_state` 以 spec 名為 key，所以新資料夾有同名 spec 會沿用到舊的重試計數與 `base_sha`。UI 在這一欄真的被改動時跳一次確認。做搬移或改 key 都要在「換資料夾」這個少見動作上押一套遷移邏輯，而它的失敗模式（搬一半）比現在這個（看板換來源）難救。
+
+**`specs_dir` 是 trust boundary。** 它會被 `join` 進 `repo_path` 再交給 `git add`（見 `git.ts` 的 `commitStateChange`），所以 `PUT /settings` 要求解出來的絕對路徑落在 repo 底下 -- 絕對路徑與 `..` 因此一起擋掉 -- 並把 `specs/`、`./specs` 正規化成 `specs` 再存。`main_branch` 會進 git 的參數列，限制在英數與 `. _ - /`。
+
 ### 提示詞在 web UI 上可調
 
 四個角色各一份可編輯的模板，存 DB，per-workspace。沒有繼承或覆寫的兩層邏輯。

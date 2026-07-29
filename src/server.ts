@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import {
   openDb,
@@ -16,7 +16,9 @@ import {
   setPrompt,
   deletePrompt,
   getChatDraft,
+  updateWorkspaceSettings,
   type Workspace,
+  type WorkspaceSettings,
 } from "./db.ts";
 import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
 import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
@@ -60,6 +62,53 @@ function defaultDbPath(): string {
 
 type SseSend = (event: string, data: unknown) => void;
 
+function toInt(v: unknown): number | null {
+  const n = typeof v === "string" ? (v.trim() === "" ? NaN : Number(v)) : v;
+  return typeof n === "number" && Number.isInteger(n) ? n : null;
+}
+
+/**
+ * 設定頁送上來的值，`PUT /settings` 的 trust boundary。特別是 specsDir：
+ * 它會被 join 進 repoPath 再交給 `git add`（見 git.ts 的 commitStateChange），
+ * 所以要求解出來的絕對路徑落在 repo 底下 -- 絕對路徑與 `..` 因此一起擋掉。
+ * 存回去的是正規化過的相對路徑（`specs/`、`./specs` 都變 `specs`）。
+ */
+function parseWorkspaceSettings(
+  body: Record<string, unknown>,
+  repoPath: string,
+): { ok: WorkspaceSettings } | { error: string } {
+  const root = resolve(repoPath);
+  const raw = typeof body.specsDir === "string" ? body.specsDir.trim() : "";
+  const abs = raw === "" ? root : resolve(root, raw);
+  if (abs === root || !abs.startsWith(root + sep)) {
+    return { error: "spec 資料夾要是 repo 底下的相對路徑" };
+  }
+  const specsDir = relative(root, abs).split(sep).join("/");
+
+  const mainBranch = typeof body.mainBranch === "string" ? body.mainBranch.trim() : "";
+  // git 的 refname 規則比這個寬，但寬出來的部分（中文、`@{`、非 ASCII）
+  // 在分支名上沒有正當用途，而這個字串會進 git 的參數列。
+  if (!/^[\w.][\w./-]*$/.test(mainBranch) || mainBranch.includes("..")) {
+    return { error: "主分支只能用英數與 . _ - /，且不以 - 或 / 開頭" };
+  }
+
+  const portRangeStart = toInt(body.portRangeStart);
+  const portRangeEnd = toInt(body.portRangeEnd);
+  if (
+    portRangeStart === null || portRangeEnd === null ||
+    portRangeStart < 1024 || portRangeEnd > 65535 || portRangeStart > portRangeEnd
+  ) {
+    return { error: "連線埠要是 1024 到 65535 之間、由小到大的整數" };
+  }
+
+  const parallelLimit = toInt(body.parallelLimit);
+  if (parallelLimit === null || parallelLimit < 1 || parallelLimit > 16) {
+    return { error: "同時執行要是 1 到 16 的整數" };
+  }
+
+  return { ok: { specsDir, mainBranch, portRangeStart, portRangeEnd, parallelLimit } };
+}
+
 export interface LoomServer {
   app: Hono;
   /** 停掉所有 workspace 的排程器 timer，測試用；正式執行靠 SIGINT/SIGTERM。 */
@@ -85,7 +134,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     for (const send of sseClients) send("board-changed", { workspace });
   }
 
-  function registerWorkspace(workspace: Workspace): void {
+  function registerWorkspace(workspace: Workspace): WorkspaceHandle {
     const ctx: Ctx = {
       db,
       workspace,
@@ -104,7 +153,9 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       live: createLiveOutputStore(() => broadcast(workspace.name)),
     };
     const scheduler = startScheduler(ctx, { pollMs: opts.pollMs, onChange: () => broadcast(workspace.name) });
-    handles.set(workspace.name, { ctx, scheduler });
+    const handle = { ctx, scheduler };
+    handles.set(workspace.name, handle);
+    return handle;
   }
 
   for (const w of listWorkspaces(db)) registerWorkspace(w);
@@ -257,6 +308,30 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       scriptNames: KNOWN_SCRIPT_NAMES,
       scripts: readKnownScripts(ws.repoPath),
     });
+  });
+
+  // 建立後可改的那幾欄（DESIGN.md「資料存放」）。ctx.workspace 是註冊當下的
+  // 快照，所以存完要把整個 handle 換掉，否則排程器會繼續用舊的 specsDir。
+  // 暫停狀態跟著搬過去 -- 改設定不該順便把停住的 workspace 放出去跑。
+  app.put("/api/workspaces/:name/settings", async (c) => {
+    const name = c.req.param("name");
+    const handle = handles.get(name);
+    if (!handle) return c.json({ error: "no such workspace" }, 404);
+    const parsed = parseWorkspaceSettings(await c.req.json(), handle.ctx.workspace.repoPath);
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+    // 跑到一半的那一輪攔不住：scheduler.stop() 只清 timer，正在 await 的
+    // driveSpec 會拿著舊 ctx 把 spec.md、issue 檔、狀態 commit 寫完，那些
+    // 寫入會落在舊的 specsDir。所以要人等這一輪結束，不做中止。
+    if (handle.scheduler.isDriving()) {
+      return c.json({ error: "有 spec 正在跑，等這一輪結束再改" }, 409);
+    }
+    updateWorkspaceSettings(db, handle.ctx.workspace.id, parsed.ok);
+    const wasPaused = handle.scheduler.isPaused();
+    handle.scheduler.stop();
+    const next = registerWorkspace(getWorkspace(db, name)!);
+    if (wasPaused) next.scheduler.pause();
+    broadcast(name);
+    return c.json(next.ctx.workspace);
   });
 
   app.get("/api/workspaces/:name/board", (c) => {

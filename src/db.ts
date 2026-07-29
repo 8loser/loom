@@ -158,6 +158,23 @@ export function insertWorkspace(
   return Number(result.lastInsertRowid);
 }
 
+/**
+ * 建立後可編輯的那幾欄（DESIGN.md「資料存放」）。name 與 repoPath 不在內：
+ * name 是 handle 的 key 也是 worktree 路徑的一段，repoPath 換掉等於換一個
+ * 專案 -- 那兩件事都該是新增一個 workspace，不是編輯這一個。
+ */
+export type WorkspaceSettings = Pick<
+  Workspace,
+  "specsDir" | "mainBranch" | "portRangeStart" | "portRangeEnd" | "parallelLimit"
+>;
+
+export function updateWorkspaceSettings(db: Db, id: number, s: WorkspaceSettings): void {
+  db.prepare(
+    `UPDATE workspaces SET specs_dir = ?, main_branch = ?, port_range_start = ?, port_range_end = ?, parallel_limit = ?
+     WHERE id = ?`,
+  ).run(s.specsDir, s.mainBranch, s.portRangeStart, s.portRangeEnd, s.parallelLimit, id);
+}
+
 export function getWorkspace(db: Db, name: string): Workspace | undefined {
   const row = db
     .prepare("SELECT * FROM workspaces WHERE name = ?")

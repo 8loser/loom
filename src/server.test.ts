@@ -292,6 +292,12 @@ test("GET / serves the board page, and every endpoint that page calls is a real 
       assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);
     }
 
+    for (const path of ["/api/workspaces/nope/settings", "/api/workspaces/nope/prompts/coder"]) {
+      const res = await fetch(`${base}${path}`, { method: "PUT" });
+      assert.equal(res.status, 404, path);
+      assert.deepEqual(await res.json(), { error: "no such workspace" }, `${path} must hit a handler, not a route miss`);
+    }
+
     for (const path of ["/api/workspaces/nope/board", "/api/workspaces/nope/settings", "/api/workspaces/nope/prompts", "/api/workspaces/nope/chat"]) {
       const res = await fetch(`${base}${path}`);
       assert.equal(res.status, 404, path);
@@ -394,6 +400,174 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
       "the page renders this list, so it must come from devserver.ts rather than being hardcoded in ui.html",
     );
   } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
+test("settings: editing specsDir re-points the board and the scheduler at the new folder", async () => {
+  const repoPath = initRepoWithDraftSpec();
+  // 第二個資料夾，跟預設的 specs/ 放不同的 spec，才看得出來端點換了來源而不是
+  // 剛好兩邊都有同一個 spec。
+  const otherIssues = join(repoPath, "plans", "other", "issues");
+  mkdirSync(otherIssues, { recursive: true });
+  writeFileSync(
+    join(repoPath, "plans", "other", "spec.md"),
+    writeSpecFrontMatter("# other\n\nproblem statement.\n", { merged: false, blockedReason: null }),
+  );
+  writeFileSync(
+    join(otherIssues, "01-issue.md"),
+    writeIssueFrontMatter("# 01 issue\n\nnot finalized yet.\n", { status: "draft", e2e: false, blockedBy: [] }),
+  );
+  sh(repoPath, "git", ["add", "-A"]);
+  sh(repoPath, "git", ["commit", "-q", "-m", "plans"]);
+
+  const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
+  try {
+    await fetch(`${base}/api/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo-ws", repoPath }),
+    });
+    const before = await (await fetch(`${base}/api/workspaces/demo-ws/board`)).json();
+    assert.deepEqual(before.specs.map((s: { spec: string }) => s.spec), ["demo"]);
+
+    const res = await fetch(`${base}/api/workspaces/demo-ws/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        specsDir: "plans/", // 尾斜線正規化掉，存回去的是 "plans"
+        mainBranch: "main",
+        portRangeStart: 5000,
+        portRangeEnd: 5010,
+        parallelLimit: 3,
+      }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).specsDir, "plans");
+
+    const after = await (await fetch(`${base}/api/workspaces/demo-ws/board`)).json();
+    assert.deepEqual(
+      after.specs.map((s: { spec: string }) => s.spec),
+      ["other"],
+      "handle 換掉了，排程器與 board 都讀新的資料夾",
+    );
+    const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
+    assert.equal(s.workspace.specsDir, "plans");
+    assert.equal(s.workspace.portRangeStart, 5000);
+    assert.equal(s.workspace.parallelLimit, 3);
+  } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
+test("settings: rejects a specsDir outside the repo and a backwards port range, leaving the stored config alone", async () => {
+  const repoPath = initRepoWithDraftSpec();
+  const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
+  try {
+    await fetch(`${base}/api/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo-ws", repoPath }),
+    });
+    const ok = { specsDir: "specs", mainBranch: "main", portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2 };
+    const put = (body: Record<string, unknown>) =>
+      fetch(`${base}/api/workspaces/demo-ws/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...ok, ...body }),
+      });
+
+    // specsDir 會被 join 進 repoPath 再交給 `git add`，所以逃出 repo 的三種
+    // 寫法都要擋：..、絕對路徑、指到 repo 根自己。
+    assert.equal((await put({ specsDir: "../elsewhere" })).status, 400);
+    assert.equal((await put({ specsDir: "/etc" })).status, 400);
+    assert.equal((await put({ specsDir: "." })).status, 400);
+    assert.equal((await put({ specsDir: "" })).status, 400);
+    assert.equal((await put({ mainBranch: "-x" })).status, 400);
+    assert.equal((await put({ mainBranch: "" })).status, 400);
+    assert.equal((await put({ portRangeStart: 5000, portRangeEnd: 4000 })).status, 400);
+    assert.equal((await put({ portRangeStart: 80 })).status, 400);
+    assert.equal((await put({ parallelLimit: 0 })).status, 400);
+    assert.equal((await put({ parallelLimit: 1.5 })).status, 400);
+
+    const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
+    assert.equal(s.workspace.specsDir, "specs");
+    assert.equal(s.workspace.portRangeStart, 4300);
+  } finally {
+    await stopTestServer(loom, httpServer);
+  }
+});
+
+test("settings: refuses to edit while a spec is mid-flight, then accepts once it lands", async () => {
+  const repoPath = mkdtempSync(join(scratchRoot, "repo-"));
+  sh(repoPath, "git", ["init", "-q", "-b", "main"]);
+  sh(repoPath, "git", ["config", "user.email", "t@t"]);
+  sh(repoPath, "git", ["config", "user.name", "t"]);
+  writeFileSync(join(repoPath, "README.md"), "hello\n");
+  const issuesDir = join(repoPath, "specs", "demo", "issues");
+  mkdirSync(issuesDir, { recursive: true });
+  writeFileSync(
+    join(repoPath, "specs", "demo", "spec.md"),
+    writeSpecFrontMatter("# demo\n\nproblem statement.\n", { merged: false, blockedReason: null }),
+  );
+  writeFileSync(
+    join(issuesDir, "01-issue.md"),
+    writeIssueFrontMatter("# 01 issue\n\ndo the thing.\n", { status: "ready", e2e: false, blockedBy: [] }),
+  );
+  sh(repoPath, "git", ["add", "-A"]);
+  sh(repoPath, "git", ["commit", "-q", "-m", "init"]);
+
+  // 第一次 coder 呼叫卡住不回應，把排程器釘在 driveSpec 裡面 -- 那正是
+  // 「有東西正在跑」的狀態，設定不該在這時候被抽換。
+  const inner = stubAgent();
+  let coderCalled!: () => void;
+  const entered = new Promise<void>((r) => { coderCalled = r; });
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  let firstCall = true;
+  const agent: AgentRunner = async (req) => {
+    if (req.role === "coder" && firstCall) {
+      firstCall = false;
+      coderCalled();
+      await held;
+    }
+    return inner(req);
+  };
+
+  const { loom, base, httpServer } = await startTestServer({ agent });
+  try {
+    await fetch(`${base}/api/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo-ws", repoPath }),
+    });
+    await entered;
+
+    const body = JSON.stringify({
+      specsDir: "plans",
+      mainBranch: "main",
+      portRangeStart: 4300,
+      portRangeEnd: 4399,
+      parallelLimit: 2,
+    });
+    const busy = await fetch(`${base}/api/workspaces/demo-ws/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    assert.equal(busy.status, 409);
+
+    release();
+    await waitFor(async () => {
+      const res = await fetch(`${base}/api/workspaces/demo-ws/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      return res.status === 200;
+    }, 15_000);
+  } finally {
+    release();
     await stopTestServer(loom, httpServer);
   }
 });
