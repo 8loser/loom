@@ -49,7 +49,8 @@ interface Scripts {
   [name: string]: string;
 }
 
-function readScripts(cwd: string): Scripts | null {
+/** 讀專案 package.json 的完整 scripts。coder prompt 用它列出「有哪些現成指令」。 */
+export function readScripts(cwd: string): Scripts | null {
   const path = join(cwd, "package.json");
   if (!existsSync(path)) return null;
   try {

@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { templateVarsFor } from "./agent.ts";
 import type { AgentRequest } from "./orchestrator.ts";
@@ -68,6 +71,31 @@ test("every declared variable can actually be filled with a value", () => {
       assert.ok(available.has(name), `${role} advertises {${name}} but agent.ts never supplies it`);
     }
   }
+});
+
+test("templateVarsFor: coder gets the worktree's actual package.json scripts, not last checked once", () => {
+  const dir = mkdtempSync(join(tmpdir(), "loom-prompts-test-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { test: "vitest run", build: "vite build" } }));
+
+  const request: AgentRequest = {
+    role: "coder",
+    workspace: {
+      id: 1,
+      name: "w",
+      repoPath: "/nowhere",
+      specsDir: "specs",
+      mainBranch: "main",
+      portRangeStart: 4300,
+      portRangeEnd: 4399,
+      parallelLimit: 2,
+    },
+    spec: "demo",
+    issue: "01",
+    worktreePath: dir,
+    attempt: 1,
+  };
+
+  assert.equal(templateVarsFor(request).scripts, "test: vitest run\nbuild: vite build");
 });
 
 test("vendored templates keep the MIT attribution", () => {

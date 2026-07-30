@@ -47,6 +47,12 @@ TDD is the red -> green loop.
 
 # Before you finish
 
+The project's own \`package.json\` scripts are below -- use them instead of guessing a package manager or a command that doesn't exist in this repo.
+
+<scripts>
+{scripts}
+</scripts>
+
 Run typechecking and the relevant test files yourself. Don't hand over red.
 
 Do not modify anything under the specs directory -- orchestrator state lives there and only the orchestrator writes to it.
@@ -197,7 +203,7 @@ export type PromptRoleName = keyof typeof DEFAULT_TEMPLATES;
  * 檢查：模板用到的一定有宣告，宣告的一定填得出值。
  */
 export const TEMPLATE_VARIABLES: Record<PromptRoleName, string[]> = {
-  coder: ["spec", "spec_md", "issue_md", "last_failure", "base_sha", "attempt"],
+  coder: ["spec", "spec_md", "issue_md", "last_failure", "base_sha", "attempt", "scripts"],
   issue_reviewer: ["spec", "spec_md", "issue_md", "diff", "base_sha", "attempt"],
   spec_reviewer: ["spec", "spec_md", "diff", "main_branch"],
   chat: ["repo_path"],
