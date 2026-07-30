@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { runClaude, type ClaudeRunResult } from "./claude.ts";
+import { readScripts } from "./devserver.ts";
 import { DEFAULT_TEMPLATES, renderTemplate, type PromptRoleName } from "./prompts.ts";
 import type { AgentRunner, AgentRequest, AgentResponse } from "./orchestrator.ts";
 
@@ -71,6 +72,15 @@ function readOr(path: string | undefined, fallback = ""): string {
   }
 }
 
+/** package.json 的全部 scripts 攤成一行一個給 coder 讀，省得每次都重查一遍。 */
+function formatScripts(worktreePath: string): string {
+  const scripts = readScripts(worktreePath);
+  if (!scripts) return "";
+  return Object.entries(scripts)
+    .map(([name, command]) => `${name}: ${command}`)
+    .join("\n");
+}
+
 /** 模板變數的唯一來源。prompts.test.ts 用它檢查設定頁宣告的變數都填得出值。 */
 export function templateVarsFor(req: AgentRequest): Record<string, string | undefined> {
   const specMdPath = join(req.workspace.repoPath, req.workspace.specsDir, req.spec, "spec.md");
@@ -84,6 +94,7 @@ export function templateVarsFor(req: AgentRequest): Record<string, string | unde
     attempt: String(req.attempt),
     main_branch: req.workspace.mainBranch,
     repo_path: req.workspace.repoPath,
+    scripts: formatScripts(req.worktreePath),
   };
 }
 
