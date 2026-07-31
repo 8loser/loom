@@ -452,6 +452,70 @@ test("pnpm-workspace.yaml is recognised as the workspace declaration", () => {
   assert.deepEqual(resolveScripts(dir).stages.test, [{ dir: "packages/core", script: "test" }]);
 });
 
+// 認不出寫法的代價不是少跑幾個 package，是整個 monorepo 被當成單一 package 而
+// 走回「沒有 script → pass: true」。這幾種都是 pnpm 收得下的普通 YAML。
+test("the pnpm parser survives unindented items and trailing comments", () => {
+  const forms = {
+    // YAML 的 sequence item 可以完全不縮排。
+    unindented: "packages:\n- 'packages/*'\n",
+    // 行尾註解不該讓這一項失效 -- 更不該讓它後面的項目跟著被丟掉。
+    trailingComment: "packages:\n  - 'packages/*' # 前後端都在這\n  - 'apps/*'\n",
+    // 沒有引號也是合法寫法。
+    unquoted: "packages:\n  - packages/*\n",
+    // 下一個 top-level key 才是清單的結束。
+    followedByAnotherKey: "packages:\n  - 'packages/*'\nonlyBuiltDependencies:\n  - esbuild\n",
+  };
+
+  for (const [form, yaml] of Object.entries(forms)) {
+    const dir = monorepoWith({}, { "packages/core": { test: "vitest run" } });
+    writeFileSync(join(dir, "pnpm-workspace.yaml"), yaml);
+    assert.deepEqual(
+      resolveScripts(dir).stages.test,
+      [{ dir: "packages/core", script: "test" }],
+      `${form}: unrecognised means the whole monorepo silently passes, not just this one package`,
+    );
+  }
+
+  // 行尾註解那一項後面還有東西時，後面的也要留著。
+  const withApps = monorepoWith({}, { "packages/core": { test: "vitest run" }, "apps/web": { test: "vitest run" } });
+  writeFileSync(join(withApps, "pnpm-workspace.yaml"), forms.trailingComment);
+  assert.deepEqual(
+    resolveScripts(withApps).stages.test.map((t) => t.dir),
+    ["apps/web", "packages/core"],
+    "a trailing comment must not truncate the rest of the list",
+  );
+});
+
+// 專案明講不要的 package。只跳過那條 pattern 的話排除等於沒發生：它照樣被前面
+// 的 `packages/*` 收進來，跑它的 test，紅了就擋住每一個 issue。
+test("a negated workspace pattern actually excludes that package", () => {
+  const dir = monorepoWith({ workspaces: ["packages/*", "!packages/legacy"] }, {
+    "packages/core": { test: "vitest run" },
+    "packages/legacy": { test: "exit 1" },
+  });
+
+  assert.deepEqual(resolveScripts(dir).stages.test, [{ dir: "packages/core", script: "test" }]);
+  assert.deepEqual(
+    resolveScripts(dir).packages.map((p) => p.dir),
+    ["packages/core"],
+    "the settings page must not list a package loom will never run",
+  );
+});
+
+// DESIGN.md「沒有可跑的東西」要求這句話照這一輪的實際範圍講 -- 它會原封不動
+// 存進 runs.summary。翻過每個子 package 卻只說 in package.json，讀的人會以為
+// loom 根本沒往下找，而那正好是誤判成非 monorepo 時該看出來的症狀。
+test("the nothing-to-run message says it searched the workspace packages too", async () => {
+  const mono = monorepoWith({ workspaces: ["apps/*"] }, { "apps/web": { build: "vite build" } });
+  const searched = await createTestRunner().runIssueTests(ctxFor(mono, 4355));
+  assert.equal(searched.pass, true);
+  assert.match(searched.output, /no typecheck\/test script in package\.json or its 1 workspace package,/);
+
+  const single = await createTestRunner().runIssueTests(ctxFor(repoWith({ build: "true" }), 4356));
+  assert.match(single.output, /in package\.json,/, "a single-package repo must not claim to have searched workspaces");
+  assert.doesNotMatch(single.output, /workspace package/);
+});
+
 // yarn v1 的 workspaces 是 `{ packages: [...] }`，不是字串陣列。
 test("the yarn v1 object form of workspaces is recognised too", () => {
   const dir = monorepoWith({ workspaces: { packages: ["packages/*"] } }, { "packages/core": { test: "vitest run" } });

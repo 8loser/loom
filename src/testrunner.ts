@@ -72,10 +72,12 @@ export function readScripts(cwd: string): Scripts | null {
  * pnpm 的 workspace 清單不在 package.json 裡，得另外讀。
  *
  * ponytail: 手寫解析，不為了這一個欄位裝 YAML 依賴。認得的是 block 寫法
- * （`packages:` 之後每行一個 `- pattern`），撐不住的是 flow 寫法
- * （`packages: ['a', 'b']`）與巢狀結構。兩者在 pnpm-workspace.yaml 實務上
- * 幾乎不出現；真的遇到就是這裡回空陣列、當成不是 monorepo，設定頁的
- * 「測試階段會跑」會照實顯示沒東西可跑，不會靜默算過。
+ * （`packages:` 之後每行一個 `- pattern`，縮排與否都可以，行尾註解會剝掉），
+ * 撐不住的是 flow 寫法（`packages: ['a', 'b']`）與巢狀結構。
+ *
+ * 認不出來的代價不是「少跑一點」而是整個 monorepo 被當成單一 package，走回
+ * 「沒有 script → pass: true」那條靜默通過的路 -- 所以寧可多認幾種寫法，也
+ * 不要在這裡省。
  */
 function readPnpmWorkspaceGlobs(root: string): string[] {
   const path = join(root, "pnpm-workspace.yaml");
@@ -84,10 +86,16 @@ function readPnpmWorkspaceGlobs(root: string): string[] {
   if (block === undefined) return [];
   const globs: string[] = [];
   for (const line of block.split("\n")) {
-    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
-    const item = /^\s+-\s*['"]?([^'"#]+?)['"]?\s*$/.exec(line);
-    if (item === null) break; // 縮排結束，下一個 top-level key
-    globs.push(item[1]);
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    // YAML 的 sequence item 可以完全不縮排，所以「還在這個 block 裡」的判斷
+    // 是「這行是不是 `-` 開頭」，不是縮排深度。不是的話就是下一個 top-level key。
+    if (!trimmed.startsWith("-")) break;
+    const value = trimmed.slice(1).trim();
+    // 有引號就取引號內（pattern 裡的 `#` 不是註解），沒引號才把 `#` 之後剝掉。
+    const quoted = /^(['"])(.*?)\1/.exec(value);
+    const glob = quoted === null ? value.split("#")[0].trim() : quoted[2];
+    if (glob !== "") globs.push(glob);
   }
   return globs;
 }
@@ -111,10 +119,16 @@ export interface WorkspacePackage {
  * 先後會進 runs.summary，每次不一樣的話兩輪的輸出沒辦法對照。
  */
 export function readWorkspacePackages(root: string): WorkspacePackage[] {
-  const dirs = new Set<string>();
+  const included = new Set<string>();
+  const excluded = new Set<string>();
   for (const glob of readWorkspaceGlobs(root)) {
-    if (glob.startsWith("!")) continue; // 負向 pattern：跳過，不當成要掃的目錄
-    for (const hit of globSync(`${glob}/package.json`, {
+    // `!packages/legacy` 是專案明講不要的那個 package。只跳過這條 pattern 的話
+    // 排除等於沒發生 -- 它照樣被前面的 `packages/*` 收進來，然後跑它的 test，
+    // 紅了就擋住每一個 issue。負向 pattern 用同一個 globSync 展開成目錄再扣掉，
+    // 省得自己寫一套 glob 比對。
+    const negated = glob.startsWith("!");
+    const dirs = negated ? excluded : included;
+    for (const hit of globSync(`${negated ? glob.slice(1) : glob}/package.json`, {
       cwd: root,
       // 依賴自己帶的 package.json 不是這個 repo 的 workspace。`**` 這種
       // pattern 沒有這條就會把整棵 node_modules 掃進來。
@@ -123,7 +137,8 @@ export function readWorkspacePackages(root: string): WorkspacePackage[] {
       dirs.add(dirname(hit));
     }
   }
-  return [...dirs]
+  return [...included]
+    .filter((dir) => !excluded.has(dir))
     .sort()
     .map((dir) => ({ dir, scripts: readScripts(join(root, dir)) ?? {} }))
     .filter((pkg) => Object.keys(pkg.scripts).length > 0);
@@ -332,6 +347,18 @@ function nothingToRun(what: string): TestResult {
   return { pass: true, output: `[loom] ${what}, nothing to run` };
 }
 
+/**
+ * 「沒找到 script」的訊息要講出實際找過的範圍。DESIGN.md「沒有可跑的東西」要求
+ * 這句話照這一輪的實際情況講，因為它會原封不動存進 `runs.summary` -- monorepo
+ * 明明也翻過每個子 package 卻只說 `in package.json`，讀的人會以為 loom 根本
+ * 沒往下找，而這正好是誤判成非 monorepo 時該看出來的症狀。
+ */
+function searchScope(packages: readonly WorkspacePackage[]): string {
+  if (packages.length === 0) return "package.json";
+  const which = packages.length === 1 ? "1 workspace package" : `${packages.length} workspace packages`;
+  return `package.json or its ${which}`;
+}
+
 function infraFailure(output: string): TestResult {
   return { pass: false, failure: "infra", output };
 }
@@ -398,7 +425,9 @@ export function createTestRunner(options: TestRunnerOptions = {}): TestRunner {
     // 「沒有 e2e script」是假的，而這句話會原封不動存進 runs.summary。
     const e2eTargets = ctx.e2e ? pickTargets(scripts, SCRIPTS.e2e, packages) : [];
     if (typecheckTargets.length === 0 && testTargets.length === 0 && e2eTargets.length === 0) {
-      return nothingToRun(`no ${ctx.e2e ? "typecheck/test/e2e" : "typecheck/test"} script in package.json`);
+      return nothingToRun(
+        `no ${ctx.e2e ? "typecheck/test/e2e" : "typecheck/test"} script in ${searchScope(packages)}`,
+      );
     }
 
     const begun = await beginRun(ctx);
@@ -437,7 +466,7 @@ export function createTestRunner(options: TestRunnerOptions = {}): TestRunner {
     if (target === null) return nothingToRun("no readable package.json");
 
     const e2eTargets = pickTargets(target.scripts, SCRIPTS.e2e, target.packages);
-    if (e2eTargets.length === 0) return nothingToRun("no e2e script in package.json");
+    if (e2eTargets.length === 0) return nothingToRun(`no e2e script in ${searchScope(target.packages)}`);
 
     const begun = await beginRun(ctx);
     if (!Array.isArray(begun)) return begun;
