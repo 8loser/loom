@@ -51,13 +51,15 @@ loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 
 
 他的 skill 反覆引用 `CONTEXT.md` 與 `docs/adr/`。對省 token 來說這層比通用工程術語更有效 -- 通用術語是他的專業，`slot`、`occupancy`、`week strip` 在你這裡是什麼意思是你的專業。
 
-**規範進 agent 的唯一管道是 `.loom/context.md`。** loom 讀它，填成 `{context_md}` 模板變數，coder 與兩個 reviewer 的提示詞裡都有一個 `<context>` 區塊。專案自己的 `CLAUDE.md`、`CONTEXT.md`、`CODING_STANDARDS.md` 都不參與，提示詞也不叫 agent 自己去找那些檔案 -- 那等於讓環境決定 agent 看到什麼，跟純推理引擎的立場衝突（見「agent 繼承什麼環境」）。
+**專案背景進 agent 的唯一管道是 `.loom/context.md`。** loom 讀它，填成 `{context_md}` 模板變數，coder 與兩個 reviewer 的提示詞裡都有一個 `<context>` 區塊。專案自己的 `CLAUDE.md`、`CONTEXT.md`、`CODING_STANDARDS.md` 都不參與，提示詞也不叫 agent 自己去找那些檔案 -- 那等於讓環境決定 agent 看到什麼，跟純推理引擎的立場衝突（見「agent 繼承什麼環境」）。
 
-**為什麼是 loom 自己的檔案，不是讀專案既有的 `CONTEXT.md`。** 讀既有檔案在技術上更省事，但那是把 loom 的行為綁在「這個 repo 剛好有沒有那個檔案、裡面剛好寫了什麼」上。loom 要能單獨運作，設定空間跟專案既有的分開：`.loom/context.md` 是給 agent 看的，內容為了無人值守的 coder 而寫；repo 根的 `CONTEXT.md` 是給人看的，兩者可以有交集但不該是同一份。要用既有內容就自己複製過去，那是一次明確的決定，不是隱含的耦合。
+**內容放什麼由使用者決定，loom 不規定。** 提示詞只說「這是這個專案要你先知道的事」，整份原樣塞進 `<context>` 區塊，不解析、不分節、不假設裡面是詞彙表還是編碼規範。loom 唯一預設的判準是 issue reviewer 的 smell baseline，那份清單內建在提示詞裡，跟這個檔案無關；`<context>` 講到的事情跟 baseline 抵觸時以 `<context>` 為準。
+
+**為什麼是 loom 自己的檔案，不是讀專案既有的 `CONTEXT.md`。** 讀既有檔案在技術上更省事，但那是把 loom 的行為綁在「這個 repo 剛好有沒有那個檔案、裡面剛好寫了什麼」上。loom 要能單獨運作，設定空間跟專案既有的分開。要用既有內容就自己複製過去，那是一次明確的決定，不是隱含的耦合。
 
 **為什麼是檔案，不是 DB 欄位。** 跟 `.loom/specs` 同一個理由：進版控、跟著 branch 走、協作者看得到、人可以直接編輯。存 DB 的話它會變成單機的、不在版控裡的第二份真相。
 
-**讀主 checkout 的版本，不是 worktree 的。** 跟 `spec_md` 一致。某條 spec branch 改了 `.loom/context.md` 不該立刻對別條 branch 正在跑的 coder 生效，那會讓同一批平行的 spec 拿到不同規範而且沒有訊號。
+**讀主 checkout 的版本，不是 worktree 的。** 跟 `spec_md` 一致。某條 spec branch 改了 `.loom/context.md` 不該立刻對別條 branch 正在跑的 coder 生效，那會讓同一批平行的 spec 拿到不同背景而且沒有訊號。
 
 沒有這個檔案時 `{context_md}` 是空字串，模板留一個空的 `<context>` 區塊，agent 照樣跑，reviewer 退回只用 smell baseline 判斷。設定頁不回報它在不在：寫不寫是使用者的事，沒有它也不擋執行，多一個欄位只是多一個要維護的東西。
 
@@ -551,7 +553,7 @@ loom 用空清單（`--setting-sources ""`）。
 
 **為什麼不是「專案規範免費進到每個 agent」。** 先前的版本走 `project,local`，理由是專案 `CLAUDE.md` 是現成的 per-repo 規範管道，loom 完全不用參與。放棄它換來的是一條說得完的規則：agent 看到什麼，只由 loom 的提示詞決定。中間狀態的成本在整合面：一旦環境的一部分會進去，就得回答「哪些 skill、哪些 MCP、哪些 plugin 要用」，而答案會是角色乘上專案的矩陣，那是設定頁裡長不完的東西。純推理引擎沒有這個問題，代價是專案規範得自己找路進來。
 
-**專案規範改走 `.loom/context.md`**（見「專案自己的詞彙表」）。loom 讀它填成模板變數，規範仍然是 loom 給的，不是環境帶的，立場不變。
+**專案背景改走 `.loom/context.md`**（見「專案自己的詞彙表」）。loom 讀它填成模板變數，內容是 loom 給的，不是環境帶的，立場不變。
 
 **能力要補回來是 `--plugin-dir`，不是把 `--setting-sources` 放寬。** 它可重複、session-only、不受 `--setting-sources` 影響，實測在空清單下照樣載得到 plugin 的 skill。MCP 同理走 `--mcp-config` 配現有的 `--strict-mcp-config`，是純白名單。兩個都是「明確列舉」語意，跟純推理引擎的立場一致；現在都沒有需求，所以都不帶。
 
