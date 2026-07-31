@@ -12,8 +12,8 @@
 
 | 概念 | 定義 |
 |---|---|
-| workspace | 一個 git repo 加上它的 specs 路徑與執行設定 |
-| spec | `/to-spec` 與 `/to-tickets` 的產物，一個資料夾，含 `spec.md` 與 `issues/NN-*.md` |
+| workspace | 一個 git repo 加上它的執行設定 |
+| spec | `<repo>/.loom/specs/` 底下的一個資料夾，含 `spec.md` 與 `issues/NN-*.md` |
 | issue | 唯一的工作單元，狀態機作用在這一層 |
 
 spec 不是狀態機的主體。它提供四件事：agent 的 prompt context、衝突域宣告（同 spec 的 issue 序列執行）、kanban swimlane、merge 單位。
@@ -84,9 +84,9 @@ human ──人改主意──▶ ready
 
 十一個狀態。`done` 與 `dropped` 是終端狀態，聚合時都算「不必再做」。
 
-`draft` 只用於人手寫丟進 specs 資料夾的 issue。`/to-tickets` 產出的 issue 帶 `**Status:** ready-for-agent`，匯入後直接進 `ready`。
+`draft` 只用於人手寫丟進 specs 資料夾的 issue（見「人手寫的 spec」）。chat 定稿產出的 issue 直接進 `ready` 或 `human`。
 
-**`human` 是不派工的狀態。** 來自 `/triage` 的 `ready-for-human`，或 chat 產 issue 時標記的 `needs_human`：需要判斷、需要外部存取、需要手動測試的 issue。loom 不 spawn 任何 agent，看板上獨立顯示等人處理，人做完手動標 done，序列繼續。
+**`human` 是不派工的狀態。** chat 產 issue 時標記 `needs_human` 的那些：需要判斷、需要外部存取、需要手動測試的 issue。loom 不 spawn 任何 agent，看板上獨立顯示等人處理，人做完手動標 done，序列繼續。
 
 沒有這個狀態的話，這類 issue 會被 agent 抓走、撞牆三次、進 blocked，浪費三輪完整實作才得到「這件事本來就不該自動做」這個結論。
 
@@ -166,7 +166,7 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 | 項目 | 決定 |
 |---|---|
 | 分支 | 一個 spec 一條 `spec/<name>`，一個 worktree |
-| worktree 位置 | `~/.loom/worktrees/<workspace>/<spec>`，放 repo 外避免被 glob、watcher、test runner 掃到 |
+| worktree 位置 | `<repo>/.loom/worktrees/<spec>`，目錄自帶 `.gitignore`（內容 `*`）不讓它弄髒主 checkout |
 | issue 執行順序 | 同 spec 依編號序列，跨 spec 平行；有 issue 卡住時用 `Blocked by` 判斷哪些後續仍可做 |
 | 平行上限 | 預設 2。每個跑動的 spec 佔一個 worktree、一份依賴、可能一個 dev server、一個 claude process |
 | merge 粒度 | spec 全綠才一次 merge 回 main，人工觸發 |
@@ -174,6 +174,12 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 | 每個 issue 完成後 | rebase spec branch 到最新 main，衝突就寫 `blocked_reason: rebase_conflict` |
 | 按下 merge 時 | 先 rebase；若帶進**碰到 specs 以外路徑**的 commit 才退回 verifying 重驗，過了才真的合併 |
 | merged 之後 | `git worktree remove` 加 `git branch -d spec/<name>` |
+
+**worktree 放 repo 內，代價是 CLAUDE.md 會載入兩份。** coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 CLAUDE.md，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md` -- 那是 main branch 的版本，跟 worktree 自己 checkout 出來的那份疊加。兩份相同時只是白燒 context；spec 的工作本身就在改 CLAUDE.md、或別的 spec 剛 merge 進 main 而這條 branch 還沒 rebase 到時，agent 會同時收到兩套專案規範，而且沒有任何訊號能分辨哪份該贏。放 `~/.loom/worktrees/` 沒有這個問題（那條路上只有全域那份），代價是 worktree 在 repo 被刪之後變成孤兒、路徑跟專案脫節。取後者。
+
+Claude Code 自己的 `EnterWorktree` 用 `.claude/worktrees/`，承受同一組代價，這是取捨可接受的旁證。但它的 worktree 從 HEAD 分出來、活一個 session，分歧窗口比 loom 的 spec branch 小得多，而 loom 是無人值守跑一整晚。
+
+**目錄自我忽略，不改 repo 根的 `.gitignore`。** 建 worktree 前先寫 `.loom/worktrees/.gitignore`，內容一個 `*`。repo 根那份是使用者的檔案，loom 不去動它；被 `*` 蓋到的 `.gitignore` 自己照樣生效，git 讀忽略規則不看檔案自身的忽略狀態。忽略規則絕不能寫成 `.loom/` -- 那會把 `specs` 一起蓋掉，而 `git add` 對 ignored 路徑不報錯只是不加，狀態 commit 會靜默消失。
 
 ### worktree 那一側的寫入契約
 
@@ -579,7 +585,7 @@ SQLite 存兩類東西：
 
 執行指令不存在設定裡，見下節。
 
-**`name` 與 `repo_path` 建立後不可改。** `name` 是 handle 的 key，也是 worktree 路徑（`~/.loom/worktrees/<workspace>/`）的一段；`repo_path` 換掉等於換一個專案，而 `runs`、`issue_state`、`spec_state` 全都掛在同一個 `workspace_id` 上。那兩件事該是新增一個 workspace，不是編輯這一個。
+**`name` 與 `repo_path` 建立後不可改。** `name` 是 handle 的 key；`repo_path` 換掉等於換一個專案，而 `runs`、`issue_state`、`spec_state` 全都掛在同一個 `workspace_id` 上，spec 資料夾與 worktree 也都推導自它。那兩件事該是新增一個 workspace，不是編輯這一個。
 
 **改設定要等當前那一輪跑完（`PUT /settings` 回 409）。** `ctx.workspace` 是註冊當下的快照，所以存檔後整個 handle 換掉：舊排程器 `stop()`、用新的 workspace 重新 `registerWorkspace`，暫停狀態跟著搬過去。但 `stop()` 只清 timer -- 正在 `await` 的 `driveSpec` 攔不住，它會拿著舊的 `specs_dir` 把 spec.md、issue 檔、狀態 commit 寫完。那些寫入會落在舊資料夾，跟剛存下去的設定對不上。所以有東西在跑時直接拒絕，不做中止：中止一個跑到一半的 coder 要處理 worktree 殘留與半完成的 commit，比「等它跑完」貴得多。
 
@@ -631,38 +637,17 @@ seam 已定義在下面 spec 的 Testing Decisions，照那個做，不要自己
 
 server 進程啟動時產生一個 `BOOT_ID`，SSE 的 `connected` 事件帶上它。server 重啟後瀏覽器的 `EventSource` 本來就會自動重連，前端發現 `bootId` 換了就 `location.reload()`。這樣改 `ui.html`（它是 `readFileSync` 讀的，不在 import 圖譜上，所以要 `--watch-path=src` 才追得到）不用手動重整，而且不需要另外接一套 hot reload 通道。一般手動重啟 server 也會觸發前端重載，那是對的行為：舊 UI 配新後端就是該重載。
 
-### 匯入既有的 specs 資料夾
+### 人手寫的 spec
 
-採用 loom 之前寫的 spec 沒有 front matter，loom 無法判斷它們做完了沒有。git log 裡沒有 loom 的分支命名慣例，讀 code 對照 spec 要花 LLM 錢而且答錯就是重做一次已完成的工作。
+spec 固定放 `<repo>/.loom/specs/`。人可以直接在底下建 `<slug>/spec.md` 與 `<slug>/issues/NN-*.md`，不必經過「討論」分頁。
 
-**不推斷，一次性匯入。** 第一次註冊 workspace 時列出所有沒有 front matter 的 spec，預設全部勾成「已完成，不要跑」，人把想繼續跑的取消勾選。確認後 loom 只在 `spec.md` 寫一行 front matter，不碰 issue 檔案，因為已合併的 spec 不需要 issue 狀態。
+**issue 檔沒有 front matter 時就地補一份 `status: draft`、`e2e: false`、`blocked_by: []`。** 補寫做在 `loadIssues` 裡，它是所有讀取路徑的共同入口 -- 另開一個 normalize 步驟就得在每個呼叫端記得先跑一次，漏掉一個就是一條讀到半形檔案的路徑。補上的內容不另外 commit：這條路徑包含唯讀的看板查詢，那份 front matter 由下一次狀態轉移的 `git add` 一併帶走。落點是 draft，所以補完也不會有東西自己跑起來。
 
-匯入後每個 `spec.md` 都有 front matter，所以之後任何沒有 front matter 的資料夾一定是新建的，直接當 draft，不需要區分新舊。
+**不讀 body 裡的任何欄位。** 早期版本會讀 mattpocock/skills 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 有十一個 issue 狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by 的用途」），所以那種錯誤會安靜地等到第一次有 issue blocked 才發作，且症狀是「該擋的沒擋」。
 
-預設勾成已完成而非待執行，是因為採用當下資料夾裡壓倒性多數是歷史紀錄。安全性由「什麼都不會自動跑」保證，不是由預設值保證。
+手寫的 issue 要宣告依賴就自己寫 front matter 的 `blocked_by`。正常執行照檔名編號序列走，編號排對了空著也能跑。
 
-**匯入的粒度是 spec，不是 issue。** 做到一半的 spec 只能整個標成「要跑」，再手動把已完成的那幾個 issue front matter 改成 `done`。半完成的 spec 是少數，為它把匯入 UI 從一層變兩層不划算。
-
-### 讀得懂 skills 產出的檔案
-
-loom 自己產的 issue 直接寫 front matter。但人在終端機用 `/to-tickets` 產的、或採用 loom 之前留下的檔案，狀態寫在 markdown body：`**Status:** ready-for-agent`。
-
-**loom 掃到沒有 front matter 的 issue 時讀那一行，轉成 front matter，之後只認 front matter。** 對映：
-
-| skills 的 Status | loom 的 status |
-|---|---|
-| `ready-for-agent` | `ready` |
-| `ready-for-human` | `human` |
-| `needs-triage`、`needs-info` | `draft` |
-| `wontfix` | 不匯入，忽略該 issue |
-
-body 那一行從此是歷史痕跡，可能跟 front matter 不一致，loom 不再讀它。
-
-**parser 要吃兩種格式。** local tracker 模板寫的是「a `Status:` line near the top」，但 `/to-tickets` 實際產出的是 `**Status:** ready-for-agent`（粗體）。`Blocked by` 同樣有這個差異。兩份模板本身就不一致，parser 兩種都要接受。
-
-理由是兩邊本來就不是同一組詞彙：skills 的 Status 是給人和 `/triage` 用的五個粗粒度標籤，loom 的 issue 狀態機有十一個狀態。當成「匯入時的初始值」比當成「持續同步的欄位」誠實。
-
-同一段轉換邏輯服務三個入口：第一次註冊 workspace、人在終端機用 skills 產的新 spec、手寫丟進資料夾的 spec。
+**採用 loom 之前就做完的 spec：在 `spec.md` 寫 `merged: true`。** 所有 issue 都 done 的 spec 會聚合成 verifying，而 verifying 用的 worktree 只在派工時建立，那種 spec 從沒派工過，路徑不存在。`merged: true` 讓它直接落進已合併那一列，也誠實描述事實 -- 那些程式碼早就在 main 了，沒有 diff 可驗、沒有 e2e 該跑。
 
 ### 執行指令由 package.json 提供
 
@@ -754,7 +739,9 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 | 兩層狀態同步（spec 也有完整狀態機） | 不加。spec 狀態一律由 issue 聚合算出 |
 | 多 provider 抽象層 | 要接非 Claude 的執行體 |
 | 指令設定欄位（setup / dev / test / e2e / health） | 要接沒有 `package.json` 的專案 |
-| issue 粒度的匯入 | 半完成的 spec 多到手改 front matter 變成負擔 |
+| 讀外部工具的狀態詞彙（skills 的 `Status:` / `Blocked by:`） | 不加，理由見「人手寫的 spec」 |
+| 可設定的 spec 資料夾 | 不加。固定 `.loom/specs`，換位置的自由度換不到那條路徑驗證與整套設定 UI 的成本 |
+| 已合併 spec 搬進 `spec_archived` | 不加。`merged: true` 已經是狀態的唯一事實來源，搬移會讓所在位置變成第二個來源，而 DB 記錄與重名檢查都以資料夾名為 key |
 | 已合併 spec 的歷史檢視 | 需要查跨 spec 的統計，而 specs 資料夾與 git log 答不出來 |
 | PR 層的第三次 review | 不加。一個 spec 一次 merge，PR 的 diff 就是 spec review 看過的那一份 |
 | spec review 意見的「之後再說」暫存 | 不加。理由見「spec review 意見的處理」 |

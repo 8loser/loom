@@ -455,7 +455,7 @@ const ISSUE_LABEL = {
 const SPEC_LABEL = {
   merged: "已合併", spec_blocked: "spec 卡住", blocked: "卡住", human: "等人處理",
   running: "執行中", verifying: "驗證中", mergeable: "可以合併", queued: "排隊中",
-  draft: "草稿", import_needed: "需匯入",
+  draft: "草稿", broken: "讀不出來",
 };
 const ROLE_LABEL = { coder: "coder", issue_reviewer: "reviewer", test: "test" };
 const LIVE_KIND_LABEL = { say: "說", read: "讀取", edit: "編輯", bash: "指令", search: "搜尋", tool: "工具", port: "連線埠" };
@@ -649,14 +649,8 @@ function renderSettings() {
       <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
 
       ${field("專案路徑", ws.repoPath, "ro")}
-      <!-- 可以直接打：spec 資料夾常常是還沒建的新資料夾，選取器列不到它。 -->
-      <div class="field">
-        <label class="label" for="s-specs">spec 資料夾</label>
-        <div class="pick">
-          <input class="in" id="s-specs" value="${esc(ws.specsDir)}" spellcheck="false">
-          <button class="btn" id="s-specs-browse">瀏覽…</button>
-        </div>
-      </div>
+      <!-- 固定位置、不是設定項，但要讓人看得到手寫的 spec 該放哪。 -->
+      ${field("spec 資料夾", ".loom/specs", "ro")}
       ${selectField("主分支", "s-branch", ws.mainBranch, settings.branches)}
 
       <div class="grp">
@@ -709,30 +703,18 @@ function renderSettings() {
   for (const btn of el.querySelectorAll(".prole[data-role]")) {
     btn.addEventListener("click", () => { promptRole = btn.dataset.role; renderSettings(); });
   }
-  $("s-specs-browse").addEventListener("click", browseForSpecDir);
   $("prompt-save").addEventListener("click", () => savePrompt(role.role));
   $("prompt-reset").addEventListener("click", () => resetPrompt(role.role));
   $("s-save").addEventListener("click", saveSettings);
 }
 
-/**
- * 改 spec 資料夾等於換掉整個看板的來源：舊資料夾裡的 spec 不再出現，DB 裡
- * 那些 issue 的重試計數、base_sha 仍以 spec 名為 key -- 新資料夾有同名 spec
- * 會沿用到舊紀錄。所以存檔前問一次，只在真的改了那一欄時問。
- */
 async function saveSettings() {
-  const specsDir = $("s-specs").value.trim();
-  if (specsDir !== settings.workspace.specsDir &&
-      !confirm(`spec 資料夾改成 ${specsDir} 之後，看板只會列這個資料夾底下的 spec。舊資料夾裡的不會被刪，但也不再顯示或執行。要改嗎？`)) {
-    return;
-  }
   let workspace;
   try {
     workspace = await api(`/api/workspaces/${encodeURIComponent(currentWs)}/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        specsDir,
         mainBranch: $("s-branch").value.trim(),
         parallelLimit: Number($("s-parallel").value),
         portRangeStart: Number($("s-port-start").value),
@@ -747,7 +729,7 @@ async function saveSettings() {
   say("");
   renderSettings();
   $("s-saved").textContent = "已儲存";
-  refresh(); // 換了 spec 資料夾之後看板要立刻跟著換，不等下一個 SSE 事件
+  refresh(); // 換了主分支之後看板要立刻跟著換，不等下一個 SSE 事件
 }
 
 /** 存檔與還原是同一個形狀：打一次 API，用結果更新本地那筆，重繪，報一句。 */
@@ -854,7 +836,7 @@ function renderAttention() {
   if (!board) { el.innerHTML = ""; return; }
   const banners = [];
   for (const spec of board.specs) {
-    if (spec.status === "import_needed") continue;
+    if (spec.status === "broken") continue;
     if (spec.status === "mergeable") {
       banners.push(`<div class="banner ready-to-merge">
         <span class="tag">可以收了</span>
@@ -985,13 +967,14 @@ function renderGrid() {
 
   const drafts = board.specs.filter((s) => s.status === "draft");
   const mergedList = board.specs.filter((s) => s.status === "merged");
-  const importNeeded = board.specs.filter((s) => s.status === "import_needed");
-  const active = board.specs.filter((s) => !["draft", "merged", "import_needed"].includes(s.status));
+  const broken = board.specs.filter((s) => s.status === "broken");
+  const active = board.specs.filter((s) => !["draft", "merged", "broken"].includes(s.status));
 
-  const errRows = importNeeded.map((spec) => `
+  // 讀不出狀態的 spec 就顯示錯誤訊息，沒有可按的動作 -- 要改的是檔案本身。
+  const errRows = broken.map((spec) => `
     <div class="a-spec err">
       <span class="nm">${esc(spec.spec)}</span>
-      <span class="br">需匯入 · ${esc(spec.error ?? "")}</span>
+      <span class="br">讀不出來 · ${esc(spec.error ?? "")}</span>
     </div>`).join("");
 
   const specRows = active.map((spec) => {
@@ -1020,7 +1003,7 @@ function renderGrid() {
 
   let empty = "";
   if (board.specs.length === 0) {
-    empty = emptyNote("還沒有 spec", "到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>specs/ 裡已經有手寫的 spec 資料夾的話，loom 會掃到並標成需匯入。", "去討論", "e-goto-chat");
+    empty = emptyNote("還沒有 spec", "到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>也可以自己在 .loom/specs/ 底下建資料夾手寫，loom 會掃到並收成草稿。", "去討論", "e-goto-chat");
   } else if (active.length === 0) {
     empty = emptyNote("沒有進行中的 spec", "全部是草稿或已合併。定稿之後才會開始跑。", "去討論", "e-goto-chat");
   }
@@ -1133,7 +1116,7 @@ function renderBoardSummary() {
       <span class="label">這個 workspace</span>
       <dl class="kv">
         <dt>專案路徑</dt><dd>${esc(ws.repoPath)}</dd>
-        <dt>spec 資料夾</dt><dd>${esc(ws.specsDir)}</dd>
+        <dt>spec 資料夾</dt><dd>.loom/specs</dd>
         <dt>主分支</dt><dd>${esc(ws.mainBranch)}</dd>
       </dl>
     </section>` : "";
@@ -1196,43 +1179,27 @@ function restartLiveTick() {
 // 路徑，而這裡要的就是絕對路徑。<dialog> 的 close(value) 直接當回傳值用，Esc
 // 關閉會給空字串，剛好等於「沒選」。
 let pickerPath = null;
-// 可以逛出去的上界。選 repo 時是 null（整台機器都能逛，見 /api/browse 的註解），
-// 選 spec 資料夾時是 repo 根目錄：走出去的路徑存檔時會被 parseWorkspaceSettings
-// 擋掉，不如一開始就不給走。根目錄本身也不是合法的 spec 資料夾，所以在那一層
-// 「選這個資料夾」是關掉的。
-let pickerRoot = null;
-// . 開頭的資料夾要不要列。跟 pickerRoot 分開存：兩個開關剛好都只有 spec
-// 資料夾那邊要開，但它們是兩件事。
-let pickerHidden = false;
 
 async function loadPicker(path) {
   let data;
   try {
-    data = await api(
-      `/api/browse?path=${encodeURIComponent(path ?? "")}${pickerHidden ? "&hidden=1" : ""}`,
-    );
+    data = await api(`/api/browse?path=${encodeURIComponent(path ?? "")}`);
   } catch (err) {
-    // 起始路徑可能還不存在（spec 資料夾常是新的），退回根目錄而不是停在死路。
-    if (pickerRoot && path !== pickerRoot) return loadPicker(pickerRoot);
     $("picker-path").textContent = `讀不到：${err.message}`;
     return;
   }
   pickerPath = data.path;
   const base = data.path.replace(/\/$/, "");
-  const atRoot = base === pickerRoot;
-  $("picker-pick").disabled = atRoot;
   $("picker-path").textContent = data.path + (data.isRepo ? "  (git repo)" : "");
   $("picker-list").innerHTML =
-    (data.parent && !atRoot ? `<li data-path="${esc(data.parent)}">../</li>` : "") +
+    (data.parent ? `<li data-path="${esc(data.parent)}">../</li>` : "") +
     data.dirs.map((d) =>
       `<li data-path="${esc(base + "/" + d.name)}">${esc(d.name)}${d.isRepo ? '<span class="repo">git</span>' : ""}</li>`
     ).join("");
 }
 
-function openPicker(start, { root = null, hidden = false }, onPick) {
+function openPicker(start, onPick) {
   const dlg = $("picker");
-  pickerRoot = root;
-  pickerHidden = hidden;
   loadPicker(start);
   dlg.addEventListener("close", () => {
     if (dlg.returnValue) onPick(dlg.returnValue);
@@ -1241,18 +1208,9 @@ function openPicker(start, { root = null, hidden = false }, onPick) {
 }
 
 function browseForRepo() {
-  openPicker($("new-ws-path").value.trim() || null, {}, (path) => {
+  openPicker($("new-ws-path").value.trim() || null, (path) => {
     $("new-ws-path").value = path;
     if (!$("new-ws-name").value.trim()) $("new-ws-name").value = path.split("/").pop();
-  });
-}
-
-/** 設定頁的 spec 資料夾。存的是 repo 底下的相對路徑，選取器給的是絕對路徑。 */
-function browseForSpecDir() {
-  const root = settings.workspace.repoPath.replace(/\/+$/, "");
-  const current = $("s-specs").value.trim();
-  openPicker(current ? `${root}/${current}` : root, { root, hidden: true }, (path) => {
-    $("s-specs").value = path.slice(root.length + 1);
   });
 }
 

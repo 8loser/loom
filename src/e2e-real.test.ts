@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { openDb, insertWorkspace, type Workspace } from "./db.ts";
 import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
-import { runUntilIdle, loadIssues, type Ctx, type TestRunner } from "./orchestrator.ts";
+import { runUntilIdle, loadIssues, SPECS_DIR, type Ctx, type TestRunner } from "./orchestrator.ts";
 import { createClaudeAgentRunner } from "./agent.ts";
 
 // 真的端到端：真的 claude -p 當 coder 跟 issue_reviewer，真的 git worktree，
@@ -37,13 +37,12 @@ test(
   { skip: !RUN_REAL, timeout: 5 * 60_000 },
   async () => {
     const repoPath = mkdtempSync(join(scratchRoot, "repo-"));
-    const worktreesRoot = mkdtempSync(join(scratchRoot, "worktrees-"));
     sh(repoPath, "git", ["init", "-q", "-b", "main"]);
     sh(repoPath, "git", ["config", "user.email", "t@t"]);
     sh(repoPath, "git", ["config", "user.name", "t"]);
     writeFileSync(join(repoPath, "README.md"), "demo repo\n");
 
-    const specDir = join(repoPath, "specs", "greeting");
+    const specDir = join(repoPath, SPECS_DIR, "greeting");
     const issuesDir = join(specDir, "issues");
     mkdirSync(issuesDir, { recursive: true });
     writeFileSync(
@@ -85,7 +84,6 @@ test(
     const id = insertWorkspace(db, {
       name: "e2e-real",
       repoPath,
-      specsDir: "specs",
       mainBranch: "main",
       portRangeStart: 4300,
       portRangeEnd: 4399,
@@ -95,7 +93,6 @@ test(
       id,
       name: "e2e-real",
       repoPath,
-      specsDir: "specs",
       mainBranch: "main",
       portRangeStart: 4300,
       portRangeEnd: 4399,
@@ -103,7 +100,7 @@ test(
     };
 
     const agent = createClaudeAgentRunner({ model: "haiku" });
-    const ctx: Ctx = { db, workspace, agent, test: stubTest(), worktreesRoot };
+    const ctx: Ctx = { db, workspace, agent, test: stubTest() };
 
     const results = await runUntilIdle(ctx, "greeting");
     console.log("steps:", results.map((r) => `${r.status}${r.note ? ` (${r.note})` : ""}`));
@@ -111,7 +108,7 @@ test(
     const issues = loadIssues(ctx, "greeting");
     assert.equal(issues[0].status, "done", `expected done, steps were: ${JSON.stringify(results)}`);
 
-    const wt = join(worktreesRoot, workspace.name, "greeting");
+    const wt = join(repoPath, ".loom", "worktrees", "greeting");
     const greetingPath = join(wt, "greeting.txt");
     assert.ok(existsSync(greetingPath), "the real coder must have actually created the file");
     assert.match(readFileSync(greetingPath, "utf8"), /hello from loom/);

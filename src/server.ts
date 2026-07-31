@@ -69,23 +69,13 @@ function toInt(v: unknown): number | null {
 }
 
 /**
- * 設定頁送上來的值，`PUT /settings` 的 trust boundary。特別是 specsDir：
- * 它會被 join 進 repoPath 再交給 `git add`（見 git.ts 的 commitStateChange），
- * 所以要求解出來的絕對路徑落在 repo 底下 -- 絕對路徑與 `..` 因此一起擋掉。
- * 存回去的是正規化過的相對路徑（`specs/`、`./specs` 都變 `specs`）。
+ * 設定頁送上來的值，`PUT /settings` 的 trust boundary。spec 資料夾不在內：
+ * 它固定是 `.loom/specs`（見 orchestrator.ts 的 SPECS_DIR），不是設定項，
+ * 所以這裡也沒有那條「解出來的路徑必須落在 repo 底下」的檢查要做。
  */
 function parseWorkspaceSettings(
   body: Record<string, unknown>,
-  repoPath: string,
 ): { ok: WorkspaceSettings } | { error: string } {
-  const root = resolve(repoPath);
-  const raw = typeof body.specsDir === "string" ? body.specsDir.trim() : "";
-  const abs = raw === "" ? root : resolve(root, raw);
-  if (abs === root || !abs.startsWith(root + sep)) {
-    return { error: "spec 資料夾要是 repo 底下的相對路徑" };
-  }
-  const specsDir = relative(root, abs).split(sep).join("/");
-
   const mainBranch = typeof body.mainBranch === "string" ? body.mainBranch.trim() : "";
   // git 的 refname 規則比這個寬，但寬出來的部分（中文、`@{`、非 ASCII）
   // 在分支名上沒有正當用途，而這個字串會進 git 的參數列。
@@ -107,7 +97,7 @@ function parseWorkspaceSettings(
     return { error: "同時執行要是 1 到 16 的整數" };
   }
 
-  return { ok: { specsDir, mainBranch, portRangeStart, portRangeEnd, parallelLimit } };
+  return { ok: { mainBranch, portRangeStart, portRangeEnd, parallelLimit } };
 }
 
 export interface LoomServer {
@@ -118,10 +108,9 @@ export interface LoomServer {
 
 export interface CreateServerOptions {
   dbPath?: string;
-  /** 覆寫真的 claude -p 呼叫，只給測試用（見 orchestrator.ts 的 worktreesRoot）。 */
+  /** 覆寫真的 claude -p 呼叫，只給測試用。 */
   agent?: AgentRunner;
   test?: TestRunner;
-  worktreesRoot?: string;
   pollMs?: number;
 }
 
@@ -147,7 +136,6 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
           templates: (workspaceId, role) => getPrompt(db, workspaceId, role) ?? DEFAULT_TEMPLATES[role],
         }),
       test: opts.test ?? createDevServerTestRunner(),
-      worktreesRoot: opts.worktreesRoot,
       // 每個即時輸出事件都直接觸發 broadcast，讓「即時輸出」名副其實 --
       // board 端點本來就便宜（SQLite 查詢，沒有重運算），這個 tool call
       // 等級的頻率換不到值得另外做節流的成本。
@@ -174,12 +162,10 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
   // agent，列目錄名是更小的權限，限制在 homedir 之下反而擋掉 repo 放 /mnt、
   // /srv 的正常用法。前提是 server 綁 127.0.0.1（見檔案最後的 serve()）--
   // 哪天要對外開，這條跟 workspaces 那條都得先有驗證。
-  // hidden=1 連 . 開頭的資料夾一起列。設定頁的 spec 資料夾要（spec 放在
-  // .claude/ 這種地方是正常的），選 repo 那邊不要 -- 那個選取器從家目錄開始，
-  // 全列會被 .cache、.config、.local 淹掉。
+  // 不列 . 開頭的資料夾：唯一的用途是選 repo，那個選取器從家目錄開始，全列
+  // 會被 .cache、.config、.local 淹掉。
   app.get("/api/browse", (c) => {
     const path = resolve(c.req.query("path") || homedir());
-    const hidden = c.req.query("hidden") === "1";
     let entries;
     try {
       entries = readdirSync(path, { withFileTypes: true });
@@ -187,7 +173,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
     const dirs = entries
-      .filter((e) => e.isDirectory() && (hidden || !e.name.startsWith(".")))
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
       .map((e) => ({ name: e.name, isRepo: existsSync(join(path, e.name, ".git")) }))
       .sort((a, b) => a.name.localeCompare(b.name));
     const parent = dirname(path);
@@ -205,7 +191,6 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     insertWorkspace(db, {
       name: body.name,
       repoPath: body.repoPath,
-      specsDir: body.specsDir ?? "specs",
       mainBranch: body.mainBranch ?? "main",
       portRangeStart: body.portRangeStart ?? 4300,
       portRangeEnd: body.portRangeEnd ?? 4399,
@@ -312,24 +297,23 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       // 加一個階段（例如 typecheck）要改兩個地方，而設定頁少列一個沒人會發現。
       scriptNames: KNOWN_SCRIPT_NAMES,
       scripts: readKnownScripts(ws.repoPath),
-      // 主分支欄的選項。spec 資料夾沒有對應的清單 -- 那一欄用 /api/browse
-      // 的資料夾選取器，逐層點進去，不預先把整棵樹送過來。
+      // 主分支欄的選項。
       branches: listBranches(ws.repoPath),
     });
   });
 
   // 建立後可改的那幾欄（DESIGN.md「資料存放」）。ctx.workspace 是註冊當下的
-  // 快照，所以存完要把整個 handle 換掉，否則排程器會繼續用舊的 specsDir。
+  // 快照，所以存完要把整個 handle 換掉，否則排程器會繼續用舊的 mainBranch。
   // 暫停狀態跟著搬過去 -- 改設定不該順便把停住的 workspace 放出去跑。
   app.put("/api/workspaces/:name/settings", async (c) => {
     const name = c.req.param("name");
     const handle = handles.get(name);
     if (!handle) return c.json({ error: "no such workspace" }, 404);
-    const parsed = parseWorkspaceSettings(await c.req.json(), handle.ctx.workspace.repoPath);
+    const parsed = parseWorkspaceSettings(await c.req.json());
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
     // 跑到一半的那一輪攔不住：scheduler.stop() 只清 timer，正在 await 的
-    // driveSpec 會拿著舊 ctx 把 spec.md、issue 檔、狀態 commit 寫完，那些
-    // 寫入會落在舊的 specsDir。所以要人等這一輪結束，不做中止。
+    // driveSpec 會拿著舊 ctx 把 rebase 與 merge 做完，那些操作會用舊的
+    // mainBranch。所以要人等這一輪結束，不做中止。
     if (handle.scheduler.isDriving()) {
       return c.json({ error: "有 spec 正在跑，等這一輪結束再改" }, 409);
     }
@@ -349,11 +333,13 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       try {
         return getSpecBoardDetail(handle.ctx, spec);
       } catch (err) {
-        // 還沒 import（沒有 front matter）或格式不對，board 上顯示出來但不
-        // 是排程器該處理的狀態，交給「匯入既有 specs 資料夾」那條路。
+        // 檔案壞到讀不出狀態（front matter 格式不對、權限問題）。看板上顯示
+        // 成一行紅字帶錯誤訊息，讓人知道要去改哪個檔 -- 靜默略過會讓 spec
+        // 憑空消失，比難看更糟。沒有 front matter 不會走到這裡，loadIssues
+        // 會就地補一份 draft。
         return {
           spec,
-          status: "import_needed" as const,
+          status: "broken" as const,
           error: err instanceof Error ? err.message : String(err),
         };
       }

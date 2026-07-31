@@ -34,7 +34,6 @@ function initWorkspace(name: string) {
   const id = insertWorkspace(db, {
     name,
     repoPath,
-    specsDir: "specs",
     mainBranch: "main",
     portRangeStart: 4300,
     portRangeEnd: 4399,

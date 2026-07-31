@@ -24,7 +24,6 @@ test("workspace round-trip", () => {
   const id = insertWorkspace(db, {
     name: "clinic-web",
     repoPath: "/tmp/clinic-web",
-    specsDir: "specs",
     mainBranch: "main",
     portRangeStart: 4300,
     portRangeEnd: 4399,
@@ -41,7 +40,6 @@ test("run lifecycle records usage", () => {
   const wsId = insertWorkspace(db, {
     name: "w",
     repoPath: "/tmp/w",
-    specsDir: "specs",
     mainBranch: "main",
     portRangeStart: 4300,
     portRangeEnd: 4399,
@@ -81,7 +79,6 @@ test("issue_state tracks base_sha and independent retry counters", () => {
   const wsId = insertWorkspace(db, {
     name: "w",
     repoPath: "/tmp/w",
-    specsDir: "specs",
     mainBranch: "main",
     portRangeStart: 4300,
     portRangeEnd: 4399,
@@ -115,7 +112,7 @@ function usage(costUsd: number, inputTokens: number, outputTokens: number) {
 test("getSpecRunAggregate: sums cost/tokens across runs, tracks whether anything is still open", () => {
   const db = openDb(":memory:");
   const wsId = insertWorkspace(db, {
-    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    name: "w", repoPath: "/tmp/w", mainBranch: "main",
     portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
   });
 
@@ -146,7 +143,7 @@ test("getSpecRunAggregate: sums cost/tokens across runs, tracks whether anything
 test("getTodayRunAggregate: only counts runs started at or after the cutoff", () => {
   const db = openDb(":memory:");
   const wsId = insertWorkspace(db, {
-    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    name: "w", repoPath: "/tmp/w", mainBranch: "main",
     portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
   });
   const r1 = startRun(db, { workspaceId: wsId, spec: "s", issue: "01", role: "coder", attempt: 1, baseSha: "a" });
@@ -159,7 +156,7 @@ test("getTodayRunAggregate: only counts runs started at or after the cutoff", ()
 test("getLatestRun: most recent run for an issue by insertion order, null when there's none", () => {
   const db = openDb(":memory:");
   const wsId = insertWorkspace(db, {
-    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    name: "w", repoPath: "/tmp/w", mainBranch: "main",
     portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
   });
   assert.equal(getLatestRun(db, wsId, "s", "01"), null);
@@ -176,7 +173,7 @@ test("getLatestRun: most recent run for an issue by insertion order, null when t
 test("getSpecReviewComments: parses the latest successful spec_reviewer run, null when there's none", () => {
   const db = openDb(":memory:");
   const wsId = insertWorkspace(db, {
-    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    name: "w", repoPath: "/tmp/w", mainBranch: "main",
     portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
   });
   assert.equal(getSpecReviewComments(db, wsId, "s"), null);
@@ -190,7 +187,7 @@ test("getSpecReviewComments: parses the latest successful spec_reviewer run, nul
 test("chat draft: empty until saved, round-trips transcript and session_id, gone after delete", () => {
   const db = openDb(":memory:");
   const wsId = insertWorkspace(db, {
-    name: "w", repoPath: "/tmp/w", specsDir: "specs", mainBranch: "main",
+    name: "w", repoPath: "/tmp/w", mainBranch: "main",
     portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2,
   });
   assert.deepEqual(getChatDraft(db, wsId), { sessionId: null, transcript: [] });

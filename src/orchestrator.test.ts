@@ -15,7 +15,12 @@ import {
   type Db,
   type Workspace,
 } from "./db.ts";
-import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
+import {
+  writeIssueFrontMatter,
+  writeSpecFrontMatter,
+  readIssueFrontMatter,
+  bodyOf,
+} from "./frontmatter.ts";
 import {
   runUntilIdle,
   stepSpec,
@@ -29,6 +34,7 @@ import {
   getWorkspaceSummary,
   createLiveOutputStore,
   createSpecFromDraft,
+  SPECS_DIR,
   type Ctx,
   type AgentRunner,
   type AgentRequest,
@@ -54,19 +60,18 @@ const USAGE = {
   costUsd: 0.001,
 };
 
-/** 建一個 repo，裡面有一個 spec 跟指定的 issue 清單（front matter 直接寫好，模擬已匯入）。 */
+/** 建一個 repo，裡面有一個 spec 跟指定的 issue 清單（front matter 直接寫好）。 */
 function initWorkspaceRepo(
   spec: string,
   issues: { id: string; blockedBy?: string[] }[],
-): { repoPath: string; workspace: Workspace; db: Db; worktreesRoot: string } {
+): { repoPath: string; workspace: Workspace; db: Db } {
   const repoPath = mkdtempSync(join(scratchRoot, "repo-"));
-  const worktreesRoot = mkdtempSync(join(scratchRoot, "worktrees-"));
   sh(repoPath, "git", ["init", "-q", "-b", "main"]);
   sh(repoPath, "git", ["config", "user.email", "t@t"]);
   sh(repoPath, "git", ["config", "user.name", "t"]);
   writeFileSync(join(repoPath, "README.md"), "hello\n");
 
-  const specDir = join(repoPath, "specs", spec);
+  const specDir = join(repoPath, SPECS_DIR, spec);
   const issuesDir = join(specDir, "issues");
   mkdirSync(issuesDir, { recursive: true });
   writeFileSync(
@@ -95,7 +100,6 @@ function initWorkspaceRepo(
   const id = insertWorkspace(db, {
     name,
     repoPath,
-    specsDir: "specs",
     mainBranch: "main",
     portRangeStart: 4300,
     portRangeEnd: 4399,
@@ -105,17 +109,16 @@ function initWorkspaceRepo(
     id,
     name,
     repoPath,
-    specsDir: "specs",
     mainBranch: "main",
     portRangeStart: 4300,
     portRangeEnd: 4399,
     parallelLimit: 2,
   };
-  return { repoPath, workspace, db, worktreesRoot };
+  return { repoPath, workspace, db };
 }
 
-function wtPathFor(worktreesRoot: string, workspace: Workspace, spec: string): string {
-  return join(worktreesRoot, workspace.name, spec);
+function wtPathFor(workspace: Workspace, spec: string): string {
+  return join(workspace.repoPath, ".loom", "worktrees", spec);
 }
 
 interface StubOptions {
@@ -194,9 +197,9 @@ function makeStubTest(
 }
 
 test("happy path: single issue goes ready -> done, main gets exactly one state commit", async () => {
-  const { repoPath, workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { repoPath, workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   const beforeLog = execFileSync("git", ["log", "--oneline"], { cwd: repoPath, encoding: "utf8" });
   await runUntilIdle(ctx, "demo");
@@ -226,14 +229,13 @@ test("happy path: single issue goes ready -> done, main gets exactly one state c
 // domain fail 的話，一次基礎設施故障會吃掉 coder 改 code 的三次機會，而且
 // 第三次會觸發 threeStageClean 把已經寫好的東西整個清掉重來。
 test("a test-stage infra failure blocks immediately without burning a domain retry", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
   const ctx: Ctx = {
     db,
     workspace,
     agent,
     test: makeStubTest({ issuePass: false, issueFailure: "infra" }),
-    worktreesRoot,
   };
 
   await runUntilIdle(ctx, "demo");
@@ -249,9 +251,9 @@ test("a test-stage infra failure blocks immediately without burning a domain ret
 });
 
 test("a genuinely red test is a domain failure and does go back to the coder", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ issuePass: false }), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ issuePass: false }) };
 
   await runUntilIdle(ctx, "demo");
 
@@ -263,8 +265,8 @@ test("a genuinely red test is a domain failure and does go back to the coder", a
 });
 
 test("an issue flagged e2e:true asks the test runner for an e2e run", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
-  const issuePath = join(workspace.repoPath, "specs", "demo", "issues", "01-issue.md");
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const issuePath = join(workspace.repoPath, SPECS_DIR, "demo", "issues", "01-issue.md");
   writeFileSync(
     issuePath,
     writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "ready", e2e: true, blockedBy: [] }),
@@ -285,7 +287,6 @@ test("an issue flagged e2e:true asks the test runner for an e2e run", async () =
         return { pass: true, output: "" };
       },
     },
-    worktreesRoot,
   };
 
   await runUntilIdle(ctx, "demo");
@@ -293,16 +294,16 @@ test("an issue flagged e2e:true asks the test runner for an e2e run", async () =
 });
 
 test("domain fail retries twice in place, resets on third attempt, then passes", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "reject", "pass"] } });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
 
   const issues = loadIssues(ctx, "demo");
   assert.equal(issues[0].status, "done");
 
-  const wt = wtPathFor(worktreesRoot, workspace, "demo");
+  const wt = wtPathFor(workspace, "demo");
   assert.equal(existsSync(join(wt, "attempt-1.txt")), false, "attempt 1 must be wiped by the reset");
   assert.equal(existsSync(join(wt, "attempt-2.txt")), false, "attempt 2 must be wiped by the reset");
   assert.equal(existsSync(join(wt, "attempt-3.txt")), true, "attempt 3 is what actually landed");
@@ -317,9 +318,9 @@ test("domain fail retries twice in place, resets on third attempt, then passes",
 });
 
 test("domain fail exhausts all attempts and lands in blocked", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "reject", "reject"] } });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
 
@@ -328,9 +329,9 @@ test("domain fail exhausts all attempts and lands in blocked", async () => {
 });
 
 test("infra fail retries in place then escalates to blocked without touching domain retries", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent({ coderInfraFailTimes: 3 });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
 
@@ -342,9 +343,9 @@ test("infra fail retries in place then escalates to blocked without touching dom
 });
 
 test("usage_exhausted pauses the run loop without touching retries or issue status", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent, calls } = makeStubAgent({ coderUsageExhausted: true });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   const results = await runUntilIdle(ctx, "demo");
 
@@ -369,13 +370,13 @@ test("usage_exhausted pauses the run loop without touching retries or issue stat
 });
 
 test("verifySpec: spec_reviewer usage_exhausted reports paused without recording a verified checkpoint", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const baseAgent = makeStubAgent().agent;
   const agent: AgentRunner = async (req) => {
     if (req.role === "spec_reviewer") return { outcome: "usage_exhausted" };
     return baseAgent(req);
   };
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }) };
 
   await runUntilIdle(ctx, "demo");
   const result = await verifySpec(ctx, "demo");
@@ -392,9 +393,9 @@ test("verifySpec: spec_reviewer usage_exhausted reports paused without recording
 });
 
 test("stepSpec continues an already-active issue instead of freezing on repeated infra retries", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent, calls } = makeStubAgent({ coderInfraFailTimes: 2 });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await stepSpec(ctx, "demo"); // claims + 1st infra fail
   await stepSpec(ctx, "demo"); // 2nd infra fail (retry in place)
@@ -408,13 +409,13 @@ test("stepSpec continues an already-active issue instead of freezing on repeated
 });
 
 test("blocked-by: an independent issue keeps running while another is blocked", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [
+  const { workspace, db } = initWorkspaceRepo("demo", [
     { id: "01" },
     { id: "02", blockedBy: ["01"] },
     { id: "03" }, // independent
   ]);
   const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "reject", "reject"] } });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
 
@@ -426,14 +427,14 @@ test("blocked-by: an independent issue keeps running while another is blocked", 
 });
 
 test("dropIssueAndDownstream drops a blocked issue and everything depending on it", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [
+  const { workspace, db } = initWorkspaceRepo("demo", [
     { id: "01" },
     { id: "02", blockedBy: ["01"] },
     { id: "03", blockedBy: ["02"] },
     { id: "04" },
   ]);
   const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "reject", "reject"] } });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
   let issues = loadIssues(ctx, "demo");
@@ -449,9 +450,9 @@ test("dropIssueAndDownstream drops a blocked issue and everything depending on i
 });
 
 test("verifySpec: e2e failure creates a followup issue flagged e2e:true", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: false }), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: false }) };
 
   await runUntilIdle(ctx, "demo");
   const result = await verifySpec(ctx, "demo");
@@ -465,9 +466,9 @@ test("verifySpec: e2e failure creates a followup issue flagged e2e:true", async 
 });
 
 test("verifySpec: e2e pass returns spec review comments without creating any issue", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }) };
 
   await runUntilIdle(ctx, "demo");
   const before = loadIssues(ctx, "demo").length;
@@ -483,7 +484,7 @@ test("verifySpec: e2e pass returns spec review comments without creating any iss
 // issue 06 淘汰但沒刪」，那些只有攤開全貌才看得見。所以整份送，但 lockfile
 // 那類產生檔不送 -- 它們對這個判斷零價值卻能佔掉九成篇幅。
 test("spec review gets the whole branch diff, minus generated files", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const seen: (string | undefined)[] = [];
   const agent: AgentRunner = async (req) => {
     if (req.role === "coder") {
@@ -502,7 +503,7 @@ test("spec review gets the whole branch diff, minus generated files", async () =
     return { outcome: "ok", usage: USAGE, specReview: { comments: [] } };
   };
 
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
   await runUntilIdle(ctx, "demo");
   await verifySpec(ctx, "demo");
 
@@ -513,9 +514,9 @@ test("spec review gets the whole branch diff, minus generated files", async () =
 });
 
 test("attemptMerge: happy path merges into main and cleans up the worktree", async () => {
-  const { repoPath, workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { repoPath, workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
   await verifySpec(ctx, "demo");
@@ -525,7 +526,7 @@ test("attemptMerge: happy path merges into main and cleans up the worktree", asy
 
   assert.ok(existsSync(join(repoPath, "attempt-1.txt")), "merged code must land on main");
 
-  const wt = wtPathFor(worktreesRoot, workspace, "demo");
+  const wt = wtPathFor(workspace, "demo");
   assert.equal(existsSync(wt), false, "worktree must be removed after merge");
 
   const branches = execFileSync("git", ["branch", "--list", "spec/demo"], {
@@ -536,9 +537,9 @@ test("attemptMerge: happy path merges into main and cleans up the worktree", asy
 });
 
 test("attemptMerge: specs-only commits on main do not block merge, real code commits do", async () => {
-  const { repoPath, workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { repoPath, workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo"); // this itself produces a specs-only state commit on main
   await verifySpec(ctx, "demo");
@@ -558,22 +559,22 @@ test("attemptMerge: specs-only commits on main do not block merge, real code com
 });
 
 test("staleness: editing spec.md body after an issue is done marks it stale", async () => {
-  const { repoPath, workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { repoPath, workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
   assert.equal(loadIssues(ctx, "demo")[0].status, "done");
   assert.equal(loadIssues(ctx, "demo")[0].stale, false, "nothing changed yet");
 
-  const specFile = join(repoPath, "specs", "demo", "spec.md");
+  const specFile = join(repoPath, SPECS_DIR, "demo", "spec.md");
   writeFileSync(specFile, readFileSync(specFile, "utf8") + "\n## Testing Decisions\n\nnew constraint.\n");
   assert.equal(loadIssues(ctx, "demo")[0].stale, true, "spec body changed after done");
 });
 
 test("staleness: editing the issue's own body also marks it stale", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
   const issue = loadIssues(ctx, "demo")[0];
@@ -584,8 +585,8 @@ test("staleness: editing the issue's own body also marks it stale", async () => 
 test("staleness: orchestrator's own front matter writes never mark anything stale", async () => {
   // 這是 hash body 不 hash 整檔的理由：merged: true 是 orchestrator 自己
   // 在 merge 時寫進 spec.md front matter 的，不能讓它把所有 issue 打成過期。
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }, { id: "02" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }, { id: "02" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
   await verifySpec(ctx, "demo");
@@ -597,15 +598,15 @@ test("staleness: orchestrator's own front matter writes never mark anything stal
 });
 
 test("staleness: only done issues can be stale, and redo/acknowledge both clear the badge", async () => {
-  const { repoPath, workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }, { id: "02" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const { repoPath, workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }, { id: "02" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
 
   // 只推進 01，02 還停在 ready。
   await stepSpec(ctx, "demo");
   await stepSpec(ctx, "demo");
   await stepSpec(ctx, "demo");
 
-  const specFile = join(repoPath, "specs", "demo", "spec.md");
+  const specFile = join(repoPath, SPECS_DIR, "demo", "spec.md");
   writeFileSync(specFile, readFileSync(specFile, "utf8") + "\nchanged mid-flight.\n");
 
   const after = loadIssues(ctx, "demo");
@@ -634,9 +635,9 @@ test("staleness: only done issues can be stale, and redo/acknowledge both clear 
 });
 
 test("getSpecBoardDetail: mergeable spec reports real cost/token totals, elapsed, 0 behind main, and review comments", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest({ e2ePass: true }) };
 
   await runUntilIdle(ctx, "demo");
   await verifySpec(ctx, "demo");
@@ -653,13 +654,13 @@ test("getSpecBoardDetail: mergeable spec reports real cost/token totals, elapsed
 });
 
 test("getSpecBoardDetail: currentIssue reports the in-flight run's role and attempt for a mid-state issue", () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const live = createLiveOutputStore();
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot, live };
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), live };
 
   // 手動把 issue 推到 implementing、開一筆未結束的 run -- 只驗證讀模型，
   // 不需要真的跑一次 coder 或等它完成。
-  const issuePath = join(ctx.workspace.repoPath, "specs", "demo", "issues", "01-issue.md");
+  const issuePath = join(ctx.workspace.repoPath, SPECS_DIR, "demo", "issues", "01-issue.md");
   writeFileSync(
     issuePath,
     writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "implementing", e2e: false, blockedBy: [] }),
@@ -690,10 +691,10 @@ test("getSpecBoardDetail: currentIssue reports the in-flight run's role and atte
 });
 
 test("getSpecBoardDetail: currentIssue.liveEvents is empty when ctx.live isn't wired up (tests/stub runners don't need it)", () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
 
-  const issuePath = join(ctx.workspace.repoPath, "specs", "demo", "issues", "01-issue.md");
+  const issuePath = join(ctx.workspace.repoPath, SPECS_DIR, "demo", "issues", "01-issue.md");
   writeFileSync(
     issuePath,
     writeIssueFrontMatter(readFileSync(issuePath, "utf8"), { status: "implementing", e2e: false, blockedBy: [] }),
@@ -727,7 +728,7 @@ test("createLiveOutputStore: append/get/clear are keyed by run id, onAppend fire
 });
 
 test("live output: onEvent passed to the coder agent lands in ctx.live while the run is in flight, then gets cleared once it settles", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const live = createLiveOutputStore();
   let snapshotDuringRun: LiveEvent[] = [];
   let runIdDuringRun: number | null = null;
@@ -751,7 +752,7 @@ test("live output: onEvent passed to the coder agent lands in ctx.live while the
     return { outcome: "ok", usage: USAGE, specReview: { comments: [] } };
   };
 
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot, live };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), live };
   await runUntilIdle(ctx, "demo");
 
   assert.ok(runIdDuringRun !== null, "the coder branch above must have run");
@@ -765,9 +766,9 @@ test("live output: onEvent passed to the coder agent lands in ctx.live while the
 });
 
 test("getSpecBoardDetail: issueFailures surfaces the last review rejection reason per issue", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "pass"] } });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
 
@@ -776,9 +777,9 @@ test("getSpecBoardDetail: issueFailures surfaces the last review rejection reaso
 });
 
 test("getSpecBoardDetail: issueRetries tracks the exhausted attempt count on a blocked issue, exposes the shared max", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent({ reviewVerdicts: { "01": ["reject", "reject", "reject"] } });
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   await runUntilIdle(ctx, "demo");
 
@@ -790,9 +791,9 @@ test("getSpecBoardDetail: issueRetries tracks the exhausted attempt count on a b
 });
 
 test("getWorkspaceSummary: recentCostUsd sums today's runs, runningCount reflects specs with a mid-state issue", async () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
   const { agent } = makeStubAgent();
-  const ctx: Ctx = { db, workspace, agent, test: makeStubTest(), worktreesRoot };
+  const ctx: Ctx = { db, workspace, agent, test: makeStubTest() };
 
   const idle = getWorkspaceSummary(ctx);
   assert.equal(idle.recentCostUsd, 0);
@@ -806,8 +807,8 @@ test("getWorkspaceSummary: recentCostUsd sums today's runs, runningCount reflect
 });
 
 test("createSpecFromDraft: writes spec.md + numbered issues, resolves blocked_by from title to id, commits once, and records the chat session", () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("existing-spec", [{ id: "01" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const { workspace, db } = initWorkspaceRepo("existing-spec", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
 
   const draft: SpecDraft = {
     slug: "week-strip-ipad-portrait",
@@ -851,12 +852,41 @@ test("createSpecFromDraft: writes spec.md + numbered issues, resolves blocked_by
 });
 
 test("createSpecFromDraft: refuses to overwrite a spec that already exists", () => {
-  const { workspace, db, worktreesRoot } = initWorkspaceRepo("existing-spec", [{ id: "01" }]);
-  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest(), worktreesRoot };
+  const { workspace, db } = initWorkspaceRepo("existing-spec", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
   const draft: SpecDraft = {
     slug: "existing-spec",
     specMd: "# existing-spec\n",
     issues: [{ title: "a", body: "b", blockedBy: [], e2e: false, needsHuman: false }],
   };
   assert.throws(() => createSpecFromDraft(ctx, draft, "session-abc"), /already exists/);
+});
+
+test("手寫的 issue 檔沒有 front matter：loadIssues 就地補成 draft，body 原封不動", () => {
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
+  const path = join(workspace.repoPath, SPECS_DIR, "demo", "issues", "02-handwritten.md");
+  // 刻意帶著別的工具的詞彙：loom 不解讀 body，這兩行只是文字。
+  const body = "# 02 handwritten\n\n**Status:** ready-for-agent\n**Blocked by:** 01\n";
+  writeFileSync(path, body);
+
+  const added = loadIssues(ctx, "demo").find((i) => i.id === "02")!;
+  assert.equal(added.status, "draft", "落點是 draft，不放行就不會被派工");
+  assert.deepEqual(added.blockedBy, [], "body 的 Blocked by 不解析，要依賴就自己寫 front matter");
+  assert.equal(added.e2e, false);
+
+  const after = readFileSync(path, "utf8");
+  assert.equal(readIssueFrontMatter(after)?.status, "draft", "補寫要落到檔案上，不只在記憶體裡");
+  assert.equal(bodyOf(after), body);
+});
+
+test("spec 有 spec.md 但還沒有 issues/：算 0 個 issue，不是錯誤", () => {
+  const { workspace, db } = initWorkspaceRepo("demo", [{ id: "01" }]);
+  const ctx: Ctx = { db, workspace, agent: makeStubAgent().agent, test: makeStubTest() };
+  mkdirSync(join(workspace.repoPath, SPECS_DIR, "skeleton"), { recursive: true });
+  writeFileSync(
+    join(workspace.repoPath, SPECS_DIR, "skeleton", "spec.md"),
+    writeSpecFrontMatter("# skeleton\n", { merged: false, blockedReason: null }),
+  );
+  assert.deepEqual(loadIssues(ctx, "skeleton"), []);
 });

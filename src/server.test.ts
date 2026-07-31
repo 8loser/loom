@@ -8,7 +8,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { writeIssueFrontMatter, writeSpecFrontMatter } from "./frontmatter.ts";
 import { createServer, type LoomServer } from "./server.ts";
 import { DEFAULT_TEMPLATES } from "./prompts.ts";
-import type { AgentRunner, AgentResponse } from "./orchestrator.ts";
+import { SPECS_DIR, type AgentRunner, type AgentResponse } from "./orchestrator.ts";
 
 // 只測 HTTP/SSE 這一層的接線：workspace CRUD、board 讀模型、merge/redo 動作
 // 觸發 SSE、排程器真的把一個 ready issue 推到 done。orchestrator 本身的狀態
@@ -59,7 +59,7 @@ function initRepoWithDraftSpec(): string {
   sh(repoPath, "git", ["config", "user.name", "t"]);
   writeFileSync(join(repoPath, "README.md"), "hello\n");
 
-  const specDir = join(repoPath, "specs", "demo");
+  const specDir = join(repoPath, SPECS_DIR, "demo");
   const issuesDir = join(specDir, "issues");
   mkdirSync(issuesDir, { recursive: true });
   writeFileSync(
@@ -80,7 +80,6 @@ async function startTestServer(
 ): Promise<{ loom: LoomServer; base: string; httpServer: ServerType }> {
   const loom = createServer({
     dbPath: ":memory:",
-    worktreesRoot: mkdtempSync(join(scratchRoot, "worktrees-")),
     pollMs: 30,
     ...overrides,
   });
@@ -114,7 +113,7 @@ test("workspace CRUD: create then list", async () => {
     assert.equal(created.status, 201);
     const workspace = await created.json();
     assert.equal(workspace.name, "demo-ws");
-    assert.equal(workspace.specsDir, "specs", "unspecified fields fall back to db.ts defaults");
+    assert.equal(workspace.mainBranch, "main", "unspecified fields fall back to db.ts defaults");
 
     const listed = await fetch(`${base}/api/workspaces`);
     const workspaces = await listed.json();
@@ -146,17 +145,12 @@ test("browse lists sub-directories and flags which ones are git repos", async ()
     const inside = await fetch(`${base}/api/browse?path=${encodeURIComponent(repoPath)}`);
     const insideBody = await inside.json();
     assert.equal(insideBody.isRepo, true);
+    // 唯一的用途是選 repo，那個選取器從家目錄開始，全列會被 .cache 那些淹掉。
+    // spec 資料夾固定成 .loom/specs 之後沒有第二個呼叫端要看隱藏資料夾。
     assert.equal(
       insideBody.dirs.some((d: { name: string }) => d.name.startsWith(".")),
       false,
-      ". 開頭的預設不列（選 repo 的選取器從家目錄開始，全列會被 .cache 那些淹掉）",
-    );
-
-    // 設定頁的 spec 資料夾用這個參數：spec 放在 .claude/ 之類的地方是正常的。
-    const all = await fetch(`${base}/api/browse?path=${encodeURIComponent(repoPath)}&hidden=1`);
-    assert.ok(
-      (await all.json()).dirs.some((d: { name: string }) => d.name === ".git"),
-      "hidden=1 連 . 開頭的一起列",
+      ". 開頭的一律不列",
     );
 
     const missing = await fetch(`${base}/api/browse?path=${encodeURIComponent(join(repoPath, "no-such-dir"))}`);
@@ -200,7 +194,7 @@ test("end to end: scheduler drives a ready issue to done on its own, board and S
   sh(repoPath, "git", ["config", "user.email", "t@t"]);
   sh(repoPath, "git", ["config", "user.name", "t"]);
   writeFileSync(join(repoPath, "README.md"), "hello\n");
-  const specDir = join(repoPath, "specs", "demo");
+  const specDir = join(repoPath, SPECS_DIR, "demo");
   const issuesDir = join(specDir, "issues");
   mkdirSync(issuesDir, { recursive: true });
   writeFileSync(
@@ -400,7 +394,6 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
 
     const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
     assert.equal(s.workspace.repoPath, repoPath);
-    assert.equal(s.workspace.specsDir, "specs");
     assert.deepEqual(s.checks, { claudeMd: true, contextMd: false });
     assert.deepEqual(
       s.scripts,
@@ -412,31 +405,18 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
       ["loom:setup", "loom:typecheck", "loom:dev", "loom:test", "loom:e2e"],
       "the page renders this list, so it must come from devserver.ts rather than being hardcoded in ui.html",
     );
-    // 設定頁把主分支畫成選單，選項得從這裡來。spec 資料夾那欄改用 /api/browse
-    // 的選取器逐層點，所以這個回應裡沒有資料夾清單。
+    // 設定頁把主分支畫成選單，選項得從這裡來。spec 資料夾固定成 .loom/specs
+    // 之後不是設定項，所以這個回應裡既沒有那一欄也沒有資料夾清單。
     assert.deepEqual(s.branches, ["main"]);
-    assert.equal(s.specDirs, undefined);
+    assert.equal(s.workspace.specsDir, undefined);
   } finally {
     await stopTestServer(loom, httpServer);
   }
 });
 
-test("settings: editing specsDir re-points the board and the scheduler at the new folder", async () => {
+test("settings: 存下可編輯的那幾欄，handle 換掉之後排程器讀到新值", async () => {
   const repoPath = initRepoWithDraftSpec();
-  // 第二個資料夾，跟預設的 specs/ 放不同的 spec，才看得出來端點換了來源而不是
-  // 剛好兩邊都有同一個 spec。
-  const otherIssues = join(repoPath, "plans", "other", "issues");
-  mkdirSync(otherIssues, { recursive: true });
-  writeFileSync(
-    join(repoPath, "plans", "other", "spec.md"),
-    writeSpecFrontMatter("# other\n\nproblem statement.\n", { merged: false, blockedReason: null }),
-  );
-  writeFileSync(
-    join(otherIssues, "01-issue.md"),
-    writeIssueFrontMatter("# 01 issue\n\nnot finalized yet.\n", { status: "draft", e2e: false, blockedBy: [] }),
-  );
-  sh(repoPath, "git", ["add", "-A"]);
-  sh(repoPath, "git", ["commit", "-q", "-m", "plans"]);
+  sh(repoPath, "git", ["branch", "release"]);
 
   const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
   try {
@@ -445,39 +425,33 @@ test("settings: editing specsDir re-points the board and the scheduler at the ne
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "demo-ws", repoPath }),
     });
-    const before = await (await fetch(`${base}/api/workspaces/demo-ws/board`)).json();
-    assert.deepEqual(before.specs.map((s: { spec: string }) => s.spec), ["demo"]);
 
     const res = await fetch(`${base}/api/workspaces/demo-ws/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        specsDir: "plans/", // 尾斜線正規化掉，存回去的是 "plans"
-        mainBranch: "main",
+        mainBranch: "release",
         portRangeStart: 5000,
         portRangeEnd: 5010,
         parallelLimit: 3,
       }),
     });
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).specsDir, "plans");
+    assert.equal((await res.json()).mainBranch, "release");
 
-    const after = await (await fetch(`${base}/api/workspaces/demo-ws/board`)).json();
-    assert.deepEqual(
-      after.specs.map((s: { spec: string }) => s.spec),
-      ["other"],
-      "handle 換掉了，排程器與 board 都讀新的資料夾",
-    );
     const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
-    assert.equal(s.workspace.specsDir, "plans");
+    assert.equal(s.workspace.mainBranch, "release");
     assert.equal(s.workspace.portRangeStart, 5000);
     assert.equal(s.workspace.parallelLimit, 3);
+    // spec 資料夾固定，不跟著設定跑：看板讀的還是 .loom/specs 底下那個 spec。
+    const board = await (await fetch(`${base}/api/workspaces/demo-ws/board`)).json();
+    assert.deepEqual(board.specs.map((s: { spec: string }) => s.spec), ["demo"]);
   } finally {
     await stopTestServer(loom, httpServer);
   }
 });
 
-test("settings: rejects a specsDir outside the repo and a backwards port range, leaving the stored config alone", async () => {
+test("settings: rejects a bad branch name and a backwards port range, leaving the stored config alone", async () => {
   const repoPath = initRepoWithDraftSpec();
   const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
   try {
@@ -486,7 +460,7 @@ test("settings: rejects a specsDir outside the repo and a backwards port range, 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "demo-ws", repoPath }),
     });
-    const ok = { specsDir: "specs", mainBranch: "main", portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2 };
+    const ok = { mainBranch: "main", portRangeStart: 4300, portRangeEnd: 4399, parallelLimit: 2 };
     const put = (body: Record<string, unknown>) =>
       fetch(`${base}/api/workspaces/demo-ws/settings`, {
         method: "PUT",
@@ -494,12 +468,7 @@ test("settings: rejects a specsDir outside the repo and a backwards port range, 
         body: JSON.stringify({ ...ok, ...body }),
       });
 
-    // specsDir 會被 join 進 repoPath 再交給 `git add`，所以逃出 repo 的三種
-    // 寫法都要擋：..、絕對路徑、指到 repo 根自己。
-    assert.equal((await put({ specsDir: "../elsewhere" })).status, 400);
-    assert.equal((await put({ specsDir: "/etc" })).status, 400);
-    assert.equal((await put({ specsDir: "." })).status, 400);
-    assert.equal((await put({ specsDir: "" })).status, 400);
+    // mainBranch 這個字串會進 git 的參數列。
     assert.equal((await put({ mainBranch: "-x" })).status, 400);
     assert.equal((await put({ mainBranch: "" })).status, 400);
     assert.equal((await put({ portRangeStart: 5000, portRangeEnd: 4000 })).status, 400);
@@ -508,7 +477,7 @@ test("settings: rejects a specsDir outside the repo and a backwards port range, 
     assert.equal((await put({ parallelLimit: 1.5 })).status, 400);
 
     const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
-    assert.equal(s.workspace.specsDir, "specs");
+    assert.equal(s.workspace.mainBranch, "main");
     assert.equal(s.workspace.portRangeStart, 4300);
   } finally {
     await stopTestServer(loom, httpServer);
@@ -521,10 +490,10 @@ test("settings: refuses to edit while a spec is mid-flight, then accepts once it
   sh(repoPath, "git", ["config", "user.email", "t@t"]);
   sh(repoPath, "git", ["config", "user.name", "t"]);
   writeFileSync(join(repoPath, "README.md"), "hello\n");
-  const issuesDir = join(repoPath, "specs", "demo", "issues");
+  const issuesDir = join(repoPath, SPECS_DIR, "demo", "issues");
   mkdirSync(issuesDir, { recursive: true });
   writeFileSync(
-    join(repoPath, "specs", "demo", "spec.md"),
+    join(repoPath, SPECS_DIR, "demo", "spec.md"),
     writeSpecFrontMatter("# demo\n\nproblem statement.\n", { merged: false, blockedReason: null }),
   );
   writeFileSync(
@@ -561,7 +530,6 @@ test("settings: refuses to edit while a spec is mid-flight, then accepts once it
     await entered;
 
     const body = JSON.stringify({
-      specsDir: "plans",
       mainBranch: "main",
       portRangeStart: 4300,
       portRangeEnd: 4399,

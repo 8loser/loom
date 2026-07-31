@@ -128,44 +128,13 @@ export function writeSpecFrontMatter(raw: string, fm: SpecFrontMatter): string {
   return serializeBlock(fields, body);
 }
 
-// skills（mattpocock/skills）產出的檔案沒有 front matter，狀態寫在 body 的
-// **Status:** 或 Status: 那一行。粗體與非粗體兩種寫法都要吃（見 DESIGN.md）。
-
-const SKILLS_STATUS = /^\*{0,2}Status:\*{0,2}\s*(\S+)/m;
-const SKILLS_BLOCKED_BY = /^\*{0,2}Blocked by:\*{0,2}\s*(.+)$/m;
-
-const SKILLS_STATUS_MAP: Record<string, IssueStatus | "skip"> = {
-  "ready-for-agent": "ready",
-  "ready-for-human": "human",
-  "needs-triage": "draft",
-  "needs-info": "draft",
-  wontfix: "skip",
-};
-
 /**
- * 讀一份沒有 loom front matter 的檔案，嘗試從 skills 的慣例格式推出初始狀態。
- * 回傳 "skip" 代表這個 issue 不該被匯入（wontfix）。什麼都找不到時預設 draft，
- * 因為那正是手寫、什麼標記都沒有的 issue 該落的狀態。
+ * 人手寫丟進 specs 資料夾的 issue 檔沒有 front matter，loom 補一份最小的
+ * 上去（見 DESIGN.md「人手寫的 spec」）。body 裡的任何欄位都不解讀 --
+ * 想宣告依賴就自己寫 front matter 的 blocked_by。
  */
-export function importIssueFromSkillsFormat(
-  raw: string,
-): IssueFrontMatter | "skip" {
-  const statusMatch = SKILLS_STATUS.exec(raw);
-  const mapped = statusMatch ? SKILLS_STATUS_MAP[statusMatch[1]] : undefined;
-  if (mapped === "skip") return "skip";
-
-  const blockedByMatch = SKILLS_BLOCKED_BY.exec(raw);
-  const blockedBy =
-    blockedByMatch && !/^none$/i.test(blockedByMatch[1].trim())
-      ? blockedByMatch[1]
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0)
-      : [];
-
-  return {
-    status: mapped ?? "draft",
-    e2e: false,
-    blockedBy,
-  };
-}
+export const HANDWRITTEN_FRONT_MATTER: IssueFrontMatter = {
+  status: "draft",
+  e2e: false,
+  blockedBy: [],
+};

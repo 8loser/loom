@@ -30,9 +30,13 @@ curl -X POST http://127.0.0.1:4300/api/workspaces \
   -d '{"name":"myproj","repoPath":"/abs/path/to/repo"}'
 ```
 
-可選欄位與預設值：`specsDir`（`specs`）、`mainBranch`（`main`）、`portRangeStart`（4300）、`portRangeEnd`（4399）、`parallelLimit`（2）。
+可選欄位與預設值：`mainBranch`（`main`）、`portRangeStart`（4300）、`portRangeEnd`（4399）、`parallelLimit`（2）。
 
-建好之後排程器會掃 `<repoPath>/<specsDir>/*/spec.md`，依 front matter 的狀態推進。
+建好之後排程器會掃 `<repoPath>/.loom/specs/*/spec.md`，依 front matter 的狀態推進。spec 資料夾的位置固定，不是設定項。
+
+想自己手寫 spec 就在 `.loom/specs/<slug>/` 底下放 `spec.md` 與 `issues/NN-*.md`；issue 檔沒有 front matter 的話 loom 會補一份草稿狀態上去，要它開跑得在看板上按放行。已經做完、只是想登記進去的 spec，在 `spec.md` 寫 `merged: true`。
+
+worktree 開在 `<repoPath>/.loom/worktrees/`，那個目錄自帶 `.gitignore`，不用你自己加。
 
 ## 開發
 

@@ -8,7 +8,6 @@ export interface Workspace {
   id: number;
   name: string;
   repoPath: string;
-  specsDir: string;
   mainBranch: string;
   portRangeStart: number;
   portRangeEnd: number;
@@ -38,7 +37,6 @@ CREATE TABLE IF NOT EXISTS workspaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   repo_path TEXT NOT NULL,
-  specs_dir TEXT NOT NULL DEFAULT 'specs',
   main_branch TEXT NOT NULL DEFAULT 'main',
   port_range_start INTEGER NOT NULL DEFAULT 4300,
   port_range_end INTEGER NOT NULL DEFAULT 4399,
@@ -93,7 +91,7 @@ CREATE TABLE IF NOT EXISTS issue_state (
 -- chat_session_id：這個 spec 是從「討論」分頁定稿產生時，那次對話的
 -- claude session id（見 chat_sessions）。定稿那一刻從 chat_sessions 搬過來，
 -- 讓「開跑後只能改還沒開始的 issue，修改走 --resume 回原對話」找得到要
--- resume 哪個 session；手動匯入的 spec 這欄是 NULL。
+-- resume 哪個 session；人手寫丟進 specs 資料夾的 spec 這欄是 NULL。
 CREATE TABLE IF NOT EXISTS spec_state (
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
   spec TEXT NOT NULL,
@@ -142,13 +140,12 @@ export function insertWorkspace(
   w: Omit<Workspace, "id">,
 ): number {
   const stmt = db.prepare(
-    `INSERT INTO workspaces (name, repo_path, specs_dir, main_branch, port_range_start, port_range_end, parallel_limit, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workspaces (name, repo_path, main_branch, port_range_start, port_range_end, parallel_limit, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   const result = stmt.run(
     w.name,
     w.repoPath,
-    w.specsDir,
     w.mainBranch,
     w.portRangeStart,
     w.portRangeEnd,
@@ -160,19 +157,20 @@ export function insertWorkspace(
 
 /**
  * 建立後可編輯的那幾欄（DESIGN.md「資料存放」）。name 與 repoPath 不在內：
- * name 是 handle 的 key 也是 worktree 路徑的一段，repoPath 換掉等於換一個
- * 專案 -- 那兩件事都該是新增一個 workspace，不是編輯這一個。
+ * name 是 handle 的 key，repoPath 換掉等於換一個專案，而 runs、issue_state、
+ * spec_state 全掛在同一個 workspace_id 上 -- 那兩件事都該是新增一個
+ * workspace，不是編輯這一個。
  */
 export type WorkspaceSettings = Pick<
   Workspace,
-  "specsDir" | "mainBranch" | "portRangeStart" | "portRangeEnd" | "parallelLimit"
+  "mainBranch" | "portRangeStart" | "portRangeEnd" | "parallelLimit"
 >;
 
 export function updateWorkspaceSettings(db: Db, id: number, s: WorkspaceSettings): void {
   db.prepare(
-    `UPDATE workspaces SET specs_dir = ?, main_branch = ?, port_range_start = ?, port_range_end = ?, parallel_limit = ?
+    `UPDATE workspaces SET main_branch = ?, port_range_start = ?, port_range_end = ?, parallel_limit = ?
      WHERE id = ?`,
-  ).run(s.specsDir, s.mainBranch, s.portRangeStart, s.portRangeEnd, s.parallelLimit, id);
+  ).run(s.mainBranch, s.portRangeStart, s.portRangeEnd, s.parallelLimit, id);
 }
 
 export function getWorkspace(db: Db, name: string): Workspace | undefined {
@@ -196,7 +194,6 @@ function rowToWorkspace(row: Record<string, unknown>): Workspace {
     id: row.id as number,
     name: row.name as string,
     repoPath: row.repo_path as string,
-    specsDir: row.specs_dir as string,
     mainBranch: row.main_branch as string,
     portRangeStart: row.port_range_start as number,
     portRangeEnd: row.port_range_end as number,

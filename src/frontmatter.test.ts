@@ -5,7 +5,8 @@ import {
   writeIssueFrontMatter,
   readSpecFrontMatter,
   writeSpecFrontMatter,
-  importIssueFromSkillsFormat,
+  bodyOf,
+  HANDWRITTEN_FRONT_MATTER,
 } from "./frontmatter.ts";
 
 test("issue front matter round-trips", () => {
@@ -72,33 +73,14 @@ test("spec front matter defaults when absent", () => {
   });
 });
 
-test("skills format: ready-for-agent maps to ready", () => {
+test("手寫的 issue 補上 draft front matter，body 原封不動", () => {
   const raw = "# 04 split-shared-components\n\n**Status:** ready-for-agent\n\nBlocked by: 02\n";
-  assert.deepEqual(importIssueFromSkillsFormat(raw), {
-    status: "ready",
+  const written = writeIssueFrontMatter(raw, HANDWRITTEN_FRONT_MATTER);
+  // body 裡的 Status 與 Blocked by 是別的工具的詞彙，loom 不解讀也不改寫。
+  assert.deepEqual(readIssueFrontMatter(written), {
+    status: "draft",
     e2e: false,
-    blockedBy: ["02"],
+    blockedBy: [],
   });
-});
-
-test("skills format: non-bold Status line also parses", () => {
-  const result = importIssueFromSkillsFormat("Status: ready-for-human\n");
-  assert.notEqual(result, "skip");
-  assert.equal((result as { status: string }).status, "human");
-});
-
-test("skills format: wontfix is skipped", () => {
-  assert.equal(importIssueFromSkillsFormat("Status: wontfix\n"), "skip");
-});
-
-test("skills format: no Status line defaults to draft", () => {
-  const result = importIssueFromSkillsFormat("# hand-written issue\nno status here\n");
-  assert.deepEqual(result, { status: "draft", e2e: false, blockedBy: [] });
-});
-
-test("skills format: Blocked by None means no dependencies", () => {
-  const raw = "**Status:** ready-for-agent\n**Blocked by:** None\n";
-  const result = importIssueFromSkillsFormat(raw);
-  assert.notEqual(result, "skip");
-  assert.deepEqual((result as { blockedBy: string[] }).blockedBy, []);
+  assert.equal(bodyOf(written), raw);
 });

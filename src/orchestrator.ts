@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { Db, RunUsage, Role, Workspace } from "./db.ts";
@@ -31,6 +30,7 @@ import {
   readSpecFrontMatter,
   writeSpecFrontMatter,
   bodyOf,
+  HANDWRITTEN_FRONT_MATTER,
   MID_STATES,
   type IssueStatus,
   type SpecBlockedReason,
@@ -64,6 +64,19 @@ import {
 // 預設值，不是文件規定的數字。
 const DOMAIN_MAX_ATTEMPTS = 3;
 const INFRA_MAX_ATTEMPTS = 3;
+
+/**
+ * spec 與 worktree 都固定放在 repo 內的 `.loom/` 底下（見 DESIGN.md
+ * 「spec 資料夾」與「worktree 位置」），不是設定項。
+ *
+ * `.loom/specs` 進版控 -- 狀態就寫在那些檔案的 front matter 裡，狀態轉移
+ * 靠 commit 留痕。`.loom/worktrees` 必須被 gitignore。兩者同在 `.loom/`
+ * 底下，所以 gitignore 只能寫 `.loom/worktrees/`：寫成 `.loom/` 會把 specs
+ * 一起 ignore 掉，而 `git add` 對 ignored 路徑不報錯只是不加，狀態 commit
+ * 會靜默消失。
+ */
+export const SPECS_DIR = ".loom/specs";
+const WORKTREES_DIR = ".loom/worktrees";
 
 export type AgentRole = "coder" | "issue_reviewer" | "spec_reviewer";
 
@@ -135,14 +148,6 @@ export interface Ctx {
   workspace: Workspace;
   agent: AgentRunner;
   test: TestRunner;
-  /**
-   * worktree 根目錄，預設 ~/.loom/worktrees（見 DESIGN.md「worktree 位置」，
-   * 固定位置、放 repo 外，避免被 repo 自己的 glob/watcher/test runner 掃到）。
-   * 覆寫只用於測試 -- 絕不能推導自 repoPath，那樣兩個 parent 目錄相同的
-   * 專案（例如都在 ~/workspaces/ 底下）一旦 spec 撞名就會共用同一個
-   * worktree，這正是這裡曾經犯過的錯。
-   */
-  worktreesRoot?: string;
   /** 看板「即時輸出」的暫存區，沒給就沒有這個功能（測試用的 stub agent 不需要）。 */
   live?: LiveOutputStore;
 }
@@ -196,12 +201,11 @@ export function createLiveOutputStore(onAppend?: (runId: number) => void): LiveO
 }
 
 function worktreePath(ctx: Ctx, spec: string): string {
-  const root = ctx.worktreesRoot ?? join(homedir(), ".loom", "worktrees");
-  return join(root, ctx.workspace.name, spec);
+  return join(ctx.workspace.repoPath, WORKTREES_DIR, spec);
 }
 
 function specDir(ctx: Ctx, spec: string): string {
-  return join(ctx.workspace.repoPath, ctx.workspace.specsDir, spec);
+  return join(ctx.workspace.repoPath, SPECS_DIR, spec);
 }
 
 function issuePath(ctx: Ctx, spec: string, issue: string): string {
@@ -243,17 +247,33 @@ function specBodyOf(ctx: Ctx, spec: string): string {
   return bodyOf(readFileSync(specPath(ctx, spec), "utf8"));
 }
 
-/** 讀所有 issue 檔案的 front matter。只在 main checkout 讀，不進 worktree。 */
+/**
+ * 讀所有 issue 檔案的 front matter。只在 main checkout 讀，不進 worktree。
+ *
+ * 沒有 front matter 的檔案就地補一份 draft 上去（見 DESIGN.md「人手寫的
+ * spec」）。補寫放在這裡而不是另開一個 normalize 步驟，因為 loadIssues 是
+ * 所有讀取路徑的共同入口 -- 分開就得在每個呼叫端記得先跑一次，漏掉一個就
+ * 是一條讀到半形檔案的路徑。不在這裡 commit：這條路徑包含唯讀的看板查詢，
+ * 補上的 front matter 由下一次狀態轉移的 `git add` 一併帶走。
+ *
+ * spec 只有 spec.md、還沒有 issues/ 是合法的中間狀態（人手寫時先擺骨架），
+ * 回空清單讓它顯示成 0 個 issue，不是錯誤。
+ */
 export function loadIssues(ctx: Ctx, spec: string): IssueFile[] {
   const dir = join(specDir(ctx, spec), "issues");
+  if (!existsSync(dir)) return [];
   const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
   const specBody = specBodyOf(ctx, spec);
   const recorded = getSourceHashes(ctx.db, ctx.workspace.id, spec);
   return files.map((f) => {
     const path = join(dir, f);
-    const raw = readFileSync(path, "utf8");
-    const fm = readIssueFrontMatter(raw);
-    if (!fm) throw new Error(`issue file missing front matter (import first): ${path}`);
+    let raw = readFileSync(path, "utf8");
+    let fm = readIssueFrontMatter(raw);
+    if (!fm) {
+      fm = HANDWRITTEN_FRONT_MATTER;
+      raw = writeIssueFrontMatter(raw, fm);
+      writeFileSync(path, raw);
+    }
     const id = /^(\d+)/.exec(f)?.[1] ?? f;
     const was = recorded.get(id);
     return {
@@ -304,7 +324,7 @@ function writeIssueStatus(
     clearIssueState(ctx.db, ctx.workspace.id, spec, issue.id);
   }
   if (opts.commit) {
-    commitStateChange(ctx.workspace.repoPath, ctx.workspace.specsDir, `${issue.id} -> ${status}`);
+    commitStateChange(ctx.workspace.repoPath, SPECS_DIR, `${issue.id} -> ${status}`);
   }
 }
 
@@ -781,7 +801,7 @@ export function attemptMerge(ctx: Ctx, spec: string): MergeResult {
   const currentMainSha = currentHead(ctx.workspace.repoPath);
   if (
     verifiedSha &&
-    !onlyTouchesSpecsDir(ctx.workspace.repoPath, verifiedSha, currentMainSha, ctx.workspace.specsDir)
+    !onlyTouchesSpecsDir(ctx.workspace.repoPath, verifiedSha, currentMainSha, SPECS_DIR)
   ) {
     return { merged: false, reason: "needs_reverify" };
   }
@@ -792,7 +812,7 @@ export function attemptMerge(ctx: Ctx, spec: string): MergeResult {
     return { merged: false, reason: "rebase_conflict" };
   }
 
-  if (touchesPath(wt, ctx.workspace.mainBranch, ctx.workspace.specsDir)) {
+  if (touchesPath(wt, ctx.workspace.mainBranch, SPECS_DIR)) {
     writeSpecBlocked(ctx, spec, "specs_touched");
     return { merged: false, reason: "specs_touched" };
   }
@@ -806,7 +826,7 @@ export function attemptMerge(ctx: Ctx, spec: string): MergeResult {
   const raw = readFileSync(specPath(ctx, spec), "utf8");
   const fm = readSpecFrontMatter(raw);
   writeFileSync(specPath(ctx, spec), writeSpecFrontMatter(raw, { ...fm, merged: true }));
-  commitStateChange(ctx.workspace.repoPath, ctx.workspace.specsDir, `${spec} -> merged`);
+  commitStateChange(ctx.workspace.repoPath, SPECS_DIR, `${spec} -> merged`);
 
   removeWorktreeAndBranch(ctx.workspace.repoPath, wt, `spec/${spec}`);
   return { merged: true };
@@ -873,15 +893,15 @@ export function createSpecFromDraft(ctx: Ctx, draft: SpecDraft, chatSessionId: s
     );
   });
 
-  commitStateChange(ctx.workspace.repoPath, ctx.workspace.specsDir, `${slug} created from chat`);
+  commitStateChange(ctx.workspace.repoPath, SPECS_DIR, `${slug} created from chat`);
   setSpecChatSessionId(ctx.db, ctx.workspace.id, slug, chatSessionId);
   deleteChatDraft(ctx.db, ctx.workspace.id);
   return slug;
 }
 
-/** 掃 specsDir 底下有 spec.md 的目錄。不驗證內容格式，畸形的交給呼叫端處理。 */
+/** 掃 SPECS_DIR 底下有 spec.md 的目錄。不驗證內容格式，畸形的交給呼叫端處理。 */
 export function listSpecs(ctx: Ctx): string[] {
-  const root = join(ctx.workspace.repoPath, ctx.workspace.specsDir);
+  const root = join(ctx.workspace.repoPath, SPECS_DIR);
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
     .filter((e) => e.isDirectory() && existsSync(join(root, e.name, "spec.md")))
@@ -1087,14 +1107,14 @@ export interface Scheduler {
   pause(): void;
   /** 清掉暫停狀態（含用量用盡與上次的錯誤）並立刻嘗試往下跑。 */
   resume(): void;
-  /** 外部動作（redo issue、匯入新 spec）後的提醒：暫停中不會因此被喚醒。 */
+  /** 外部動作（redo issue、手寫新 spec）後的提醒：暫停中不會因此被喚醒。 */
   wake(): void;
   stop(): void;
   isPaused(): boolean;
   /**
    * 這一刻有沒有 spec 正跑在 driveSpec 裡。改 workspace 設定時用來擋：
-   * stop() 只清 timer，跑到一半的 tick 會拿著舊的 ctx（舊 specsDir、舊
-   * mainBranch）繼續把那一輪做完，換掉 handle 攔不住它。
+   * stop() 只清 timer，跑到一半的 tick 會拿著舊的 ctx（舊 mainBranch、舊
+   * port 範圍）繼續把那一輪做完，換掉 handle 攔不住它。
    */
   isDriving(): boolean;
   /** 上一次 tick 因未預期例外中止時的訊息；resume() 會清掉。 */

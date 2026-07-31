@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -33,8 +33,15 @@ export function listBranches(repoPath: string): string[] {
 }
 
 /**
- * spec branch 一個 worktree，放 repo 外。branch 不存在就從 main 開一條。
- * worktree 已存在就當成冪等操作跳過（崩潰重啟後會重跑到這裡）。
+ * spec branch 一個 worktree，放在 repo 內的 `.loom/worktrees/`（見 DESIGN.md
+ * 「worktree 位置」）。branch 不存在就從 main 開一條，worktree 已存在就當成
+ * 冪等操作跳過（崩潰重啟後會重跑到這裡）。
+ *
+ * worktree 在 repo 內，所以先讓那個目錄自我忽略：不忽略的話主 checkout 的
+ * `git status` 會被 N 份完整 checkout 加它們裝出來的依賴淹掉。用目錄自己的
+ * `.gitignore` 而不是去改 repo 根的那份 -- 那是使用者的檔案。忽略規則寫
+ * `*`，`.gitignore` 自己也被它蓋到，但 git 讀取忽略規則不看檔案自身的忽略
+ * 狀態，照樣生效。同一個 `.loom/` 底下的 specs 不受影響，它在這個目錄外面。
  */
 export function ensureWorktree(
   repoPath: string,
@@ -42,6 +49,10 @@ export function ensureWorktree(
   specBranch: string,
   mainBranch: string,
 ): void {
+  const worktreesRoot = dirname(worktreePath);
+  mkdirSync(worktreesRoot, { recursive: true });
+  writeFileSync(join(worktreesRoot, ".gitignore"), "*\n");
+
   if (existsSync(worktreePath)) return;
 
   const branchExists = gitOk(repoPath, [

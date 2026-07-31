@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { runClaude, type ClaudeRunResult } from "./claude.ts";
 import { readScripts } from "./devserver.ts";
 import { DEFAULT_TEMPLATES, renderTemplate, type PromptRoleName } from "./prompts.ts";
-import type { AgentRunner, AgentRequest, AgentResponse } from "./orchestrator.ts";
+import { SPECS_DIR, type AgentRunner, type AgentRequest, type AgentResponse } from "./orchestrator.ts";
 
 /**
  * 模板從哪裡來。server 傳一個讀 DB 的實作進來（per-workspace 可編輯，見
@@ -83,7 +83,7 @@ function formatScripts(worktreePath: string): string {
 
 /** 模板變數的唯一來源。prompts.test.ts 用它檢查設定頁宣告的變數都填得出值。 */
 export function templateVarsFor(req: AgentRequest): Record<string, string | undefined> {
-  const specMdPath = join(req.workspace.repoPath, req.workspace.specsDir, req.spec, "spec.md");
+  const specMdPath = join(req.workspace.repoPath, SPECS_DIR, req.spec, "spec.md");
   return {
     spec: req.spec,
     spec_md: readOr(specMdPath),
