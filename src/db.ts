@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS spec_state (
 );
 
 -- 「討論」分頁定稿前的草稿：一個 workspace 同時只有一份進行中的討論
--- （mockup 上討論分頁只有一個 thread，見 DESIGN.md「chat 產 spec」）。
+-- （討論分頁只有一個 thread，見 DESIGN.md「chat 產 spec」）。
 -- transcript_json 只給重整頁面後還原畫面用，不是狀態機的一部分 --
 -- 真正的對話歷史活在 claude 那個 session 裡，session_id 才是接續對話的
 -- 依據。定稿成功後這一列整個刪掉（見 finalizeChatDraft）。

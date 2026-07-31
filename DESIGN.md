@@ -466,7 +466,7 @@ orchestrator 把測試 stdout 存進 DB，coder 下一輪的 prompt 帶最後 20
 
 ## chat 產 spec
 
-常駐 `claude -p --input-format stream-json --output-format stream-json`，web 端雙向串接，cwd 在 main checkout。實作在 `src/chat.ts`：一個 workspace 同時只有一份進行中的討論（`chat_sessions` 表，`workspace_id` 當 PK），對應 mockup 上單一討論分頁、單一 thread 的畫面。
+常駐 `claude -p --input-format stream-json --output-format stream-json`，web 端雙向串接，cwd 在 main checkout。實作在 `src/chat.ts`：一個 workspace 同時只有一份進行中的討論（`chat_sessions` 表，`workspace_id` 當 PK），對應討論分頁上單一 thread 的畫面。
 
 **工具限制不是 `--disallowedTools Write Edit`，是 `--tools Read,Glob,Grep` 白名單。** 原計畫擋 Write/Edit 是想著「它要能讀 repo code 才討論得具體，但不該碰任何檔案」，但實測發現 `--disallowedTools Write Edit` 只擋了那兩個工具名，`Bash` 沒被擋，而 agent 發現 Write 被擋之後會自己改用 `Bash` 的 heredoc（`cat > file <<EOF`）照樣寫成功。改用白名單就是結構上只剩 Read/Glob/Grep 三個工具可用，Bash 根本不在清單裡，沒有繞路可走 -- 跟 issue reviewer 用的是同一份清單（`agent.ts` 的 `READ_ONLY_TOOLS`），不是另外發明一套。
 

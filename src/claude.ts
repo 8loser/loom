@@ -323,7 +323,7 @@ function relPath(cwd: string, p: unknown): string {
 // ponytail: Edit/Write 只顯示檔名，不算真的 +/- 行數（要嘛自己實作 diff
 // 演算法要嘛每次多 spawn 一個 git diff，兩者都換不到「看得懂 agent 在幹嘛」
 // 這個目標）；搜尋只顯示 pattern，不等 tool_result 回來算命中數。要補的話
-// 對照 mockup.html 的 .line.diff。
+// 是在編輯事件的檔名後面接上 +N / -M。
 function describeToolUse(cwd: string, name: string, input: Record<string, unknown>): { kind: LiveEventKind; text: string } {
   switch (name) {
     case "Read":
