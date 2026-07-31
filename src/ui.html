@@ -452,6 +452,10 @@ const ISSUE_LABEL = {
   reviewing: "審查中", test_ready: "待測試", testing: "測試中", done: "完成",
   blocked: "卡住", human: "等人處理", dropped: "已捨棄",
 };
+// 跟 orchestrator.ts 的 SPECS_DIR 是同一個固定值。前端沒有 server 送這個
+// 路徑過來的必要（它不會變），但三處要顯示，集中成一份。
+const SPECS_DIR = ".loom/specs";
+
 const SPEC_LABEL = {
   merged: "已合併", spec_blocked: "spec 卡住", blocked: "卡住", human: "等人處理",
   running: "執行中", verifying: "驗證中", mergeable: "可以合併", queued: "排隊中",
@@ -650,7 +654,7 @@ function renderSettings() {
 
       ${field("專案路徑", ws.repoPath, "ro")}
       <!-- 固定位置、不是設定項，但要讓人看得到手寫的 spec 該放哪。 -->
-      ${field("spec 資料夾", ".loom/specs", "ro")}
+      ${field("spec 資料夾", SPECS_DIR, "ro")}
       ${selectField("主分支", "s-branch", ws.mainBranch, settings.branches)}
 
       <div class="grp">
@@ -1003,7 +1007,7 @@ function renderGrid() {
 
   let empty = "";
   if (board.specs.length === 0) {
-    empty = emptyNote("還沒有 spec", "到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>也可以自己在 .loom/specs/ 底下建資料夾手寫，loom 會掃到並收成草稿。", "去討論", "e-goto-chat");
+    empty = emptyNote("還沒有 spec", "到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>也可以自己在 ${SPECS_DIR}/ 底下建資料夾手寫，loom 會掃到並收成草稿。", "去討論", "e-goto-chat");
   } else if (active.length === 0) {
     empty = emptyNote("沒有進行中的 spec", "全部是草稿或已合併。定稿之後才會開始跑。", "去討論", "e-goto-chat");
   }
@@ -1116,7 +1120,7 @@ function renderBoardSummary() {
       <span class="label">這個 workspace</span>
       <dl class="kv">
         <dt>專案路徑</dt><dd>${esc(ws.repoPath)}</dd>
-        <dt>spec 資料夾</dt><dd>.loom/specs</dd>
+        <dt>spec 資料夾</dt><dd>${esc(SPECS_DIR)}</dd>
         <dt>主分支</dt><dd>${esc(ws.mainBranch)}</dd>
       </dl>
     </section>` : "";

@@ -50,8 +50,11 @@ export function ensureWorktree(
   mainBranch: string,
 ): void {
   const worktreesRoot = dirname(worktreePath);
-  mkdirSync(worktreesRoot, { recursive: true });
-  writeFileSync(join(worktreesRoot, ".gitignore"), "*\n");
+  const ignoreFile = join(worktreesRoot, ".gitignore");
+  if (!existsSync(ignoreFile)) {
+    mkdirSync(worktreesRoot, { recursive: true });
+    writeFileSync(ignoreFile, "*\n");
+  }
 
   if (existsSync(worktreePath)) return;
 
@@ -283,6 +286,10 @@ export function commitStateChange(
   specsDir: string,
   message: string,
 ): CommitResult {
+  // 用明確路徑而不是 `add -A`：路徑底下有被 .gitignore 蓋到的新檔案時，
+  // `git add <path>` 會 exit 非 0 並列出那些路徑，`add -A` 才是靜默跳過。
+  // 所以忽略規則寫太寬（`.loom/` 而不是 `.loom/worktrees/`）在這裡是響亮
+  // 的失敗，不需要另外檢查 -- 這條 add 就是那個檢查。
   git(repoPath, ["add", specsDir]);
   const dirty = git(repoPath, ["status", "--porcelain", "--", specsDir]);
   if (dirty === "") {

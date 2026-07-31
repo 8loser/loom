@@ -6,7 +6,7 @@ import {
   readSpecFrontMatter,
   writeSpecFrontMatter,
   bodyOf,
-  HANDWRITTEN_FRONT_MATTER,
+  handwrittenFrontMatter,
 } from "./frontmatter.ts";
 
 test("issue front matter round-trips", () => {
@@ -75,7 +75,7 @@ test("spec front matter defaults when absent", () => {
 
 test("手寫的 issue 補上 draft front matter，body 原封不動", () => {
   const raw = "# 04 split-shared-components\n\n**Status:** ready-for-agent\n\nBlocked by: 02\n";
-  const written = writeIssueFrontMatter(raw, HANDWRITTEN_FRONT_MATTER);
+  const written = writeIssueFrontMatter(raw, handwrittenFrontMatter());
   // body 裡的 Status 與 Blocked by 是別的工具的詞彙，loom 不解讀也不改寫。
   assert.deepEqual(readIssueFrontMatter(written), {
     status: "draft",

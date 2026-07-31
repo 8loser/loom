@@ -175,11 +175,11 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 | 按下 merge 時 | 先 rebase；若帶進**碰到 specs 以外路徑**的 commit 才退回 verifying 重驗，過了才真的合併 |
 | merged 之後 | `git worktree remove` 加 `git branch -d spec/<name>` |
 
-**worktree 放 repo 內，代價是 CLAUDE.md 會載入兩份。** coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 CLAUDE.md，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md` -- 那是 main branch 的版本，跟 worktree 自己 checkout 出來的那份疊加。兩份相同時只是白燒 context；spec 的工作本身就在改 CLAUDE.md、或別的 spec 剛 merge 進 main 而這條 branch 還沒 rebase 到時，agent 會同時收到兩套專案規範，而且沒有任何訊號能分辨哪份該贏。放 `~/.loom/worktrees/` 沒有這個問題（那條路上只有全域那份），代價是 worktree 在 repo 被刪之後變成孤兒、路徑跟專案脫節。取後者。
+**worktree 放 repo 內，代價是 CLAUDE.md 會載入兩份。** coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 CLAUDE.md，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md` -- 那是 main branch 的版本，跟 worktree 自己 checkout 出來的那份疊加。兩份相同時只是白燒 context；spec 的工作本身就在改 CLAUDE.md、或別的 spec 剛 merge 進 main 而這條 branch 還沒 rebase 到時，agent 會同時收到兩套專案規範，而且沒有任何訊號能分辨哪份該贏。放 `~/.loom/worktrees/` 沒有這個問題（那條路上只有全域那份），但 worktree 會在 repo 被刪之後變成孤兒、路徑也跟專案脫節。兩邊都有代價，選 repo 內、吃下 CLAUDE.md 那一份。
 
 Claude Code 自己的 `EnterWorktree` 用 `.claude/worktrees/`，承受同一組代價，這是取捨可接受的旁證。但它的 worktree 從 HEAD 分出來、活一個 session，分歧窗口比 loom 的 spec branch 小得多，而 loom 是無人值守跑一整晚。
 
-**目錄自我忽略，不改 repo 根的 `.gitignore`。** 建 worktree 前先寫 `.loom/worktrees/.gitignore`，內容一個 `*`。repo 根那份是使用者的檔案，loom 不去動它；被 `*` 蓋到的 `.gitignore` 自己照樣生效，git 讀忽略規則不看檔案自身的忽略狀態。忽略規則絕不能寫成 `.loom/` -- 那會把 `specs` 一起蓋掉，而 `git add` 對 ignored 路徑不報錯只是不加，狀態 commit 會靜默消失。
+**目錄自我忽略，不改 repo 根的 `.gitignore`。** 建 worktree 前先寫 `.loom/worktrees/.gitignore`，內容一個 `*`。repo 根那份是使用者的檔案，loom 不去動它；被 `*` 蓋到的 `.gitignore` 自己照樣生效，git 讀忽略規則不看檔案自身的忽略狀態。忽略規則絕不能寫成 `.loom/` -- 那會把 `specs` 一起蓋掉，狀態 commit 就沒有路徑可以落地。失敗是響亮的（`commitStateChange` 用明確路徑 `git add .loom/specs`，底下有被 ignore 的新檔案時 git 會 exit 非 0 並列出來），所以不需要另外做啟動檢查；`add -A` 才是會靜默跳過的那種寫法，這也是不用它的理由之一。
 
 ### worktree 那一側的寫入契約
 
@@ -219,7 +219,7 @@ git clean -fd
 **但判定必須排除 loom 自己的狀態 commit。** 每個 issue 進 done 時 orchestrator 都往 main 塞一個只動 specs 的 commit，所以另一個 spec 只要還在跑，main 就一直在前進。照「帶進任何新 commit 就重驗」會讓 mergeable 的 spec 被反覆打回 verifying 跑幾分鐘 e2e，而帶進來的東西跟任何 code 無關，每次還要人再按一次按鈕。判定式是：
 
 ```
-git diff --name-only <old-main>..<new-main> -- . ':!<specs_dir>/'
+git diff --name-only <old-main>..<new-main> -- . ':!.loom/specs/'
 ```
 
 輸出為空就直接合併，不重驗。
@@ -581,17 +581,17 @@ SQLite 存兩類東西：
 
 **運行時資料**：base_sha、session_id、review 意見全文、失敗紀錄、耗時、成本、重試計數。
 
-**設定**：workspace 清單與每個 workspace 的 `specs_dir`、`main_branch`、`port_range`、平行上限。在 web UI 上編輯。新增 workspace 時只輸入 repo 路徑。
+**設定**：workspace 清單與每個 workspace 的 `main_branch`、`port_range`、平行上限。在 web UI 上編輯。新增 workspace 時只輸入 repo 路徑。spec 資料夾與 worktree 位置不在內，它們固定在 `.loom/` 底下（見「核心概念」與「git 拓撲」）。
 
 執行指令不存在設定裡，見下節。
 
 **`name` 與 `repo_path` 建立後不可改。** `name` 是 handle 的 key；`repo_path` 換掉等於換一個專案，而 `runs`、`issue_state`、`spec_state` 全都掛在同一個 `workspace_id` 上，spec 資料夾與 worktree 也都推導自它。那兩件事該是新增一個 workspace，不是編輯這一個。
 
-**改設定要等當前那一輪跑完（`PUT /settings` 回 409）。** `ctx.workspace` 是註冊當下的快照，所以存檔後整個 handle 換掉：舊排程器 `stop()`、用新的 workspace 重新 `registerWorkspace`，暫停狀態跟著搬過去。但 `stop()` 只清 timer -- 正在 `await` 的 `driveSpec` 攔不住，它會拿著舊的 `specs_dir` 把 spec.md、issue 檔、狀態 commit 寫完。那些寫入會落在舊資料夾，跟剛存下去的設定對不上。所以有東西在跑時直接拒絕，不做中止：中止一個跑到一半的 coder 要處理 worktree 殘留與半完成的 commit，比「等它跑完」貴得多。
+**改設定要等當前那一輪跑完（`PUT /settings` 回 409）。** `ctx.workspace` 是註冊當下的快照，所以存檔後整個 handle 換掉：舊排程器 `stop()`、用新的 workspace 重新 `registerWorkspace`，暫停狀態跟著搬過去。但 `stop()` 只清 timer -- 正在 `await` 的 `driveSpec` 攔不住，它會拿著舊的 `main_branch` 把 rebase 與 merge 做完，跟剛存下去的設定對不上。所以有東西在跑時直接拒絕，不做中止：中止一個跑到一半的 coder 要處理 worktree 殘留與半完成的 commit，比「等它跑完」貴得多。
 
-**改 `specs_dir` 不搬資料、不改 DB。** 舊資料夾裡的 spec 留在原地，只是看板不再列、排程器不再跑。DB 裡的 `issue_state`、`spec_state` 以 spec 名為 key，所以新資料夾有同名 spec 會沿用到舊的重試計數與 `base_sha`。UI 在這一欄真的被改動時跳一次確認。做搬移或改 key 都要在「換資料夾」這個少見動作上押一套遷移邏輯，而它的失敗模式（搬一半）比現在這個（看板換來源）難救。
+**spec 資料夾固定成 `.loom/specs`，不是設定。** 可設的值域實際上只有一個，卻要養一條路徑驗證（`..`、絕對路徑、指到 repo 根三種寫法都得擋，因為那個字串會被 `join` 進 `repo_path` 再交給 `git add`）加一整套設定 UI 與換資料夾時的確認流程。固定之後這些全部消失，`PUT /settings` 的 trust boundary 只剩 `main_branch`（會進 git 的參數列，限制在英數與 `. _ - /`）與三個數字欄位。
 
-**`specs_dir` 是 trust boundary。** 它會被 `join` 進 `repo_path` 再交給 `git add`（見 `git.ts` 的 `commitStateChange`），所以 `PUT /settings` 要求解出來的絕對路徑落在 repo 底下 -- 絕對路徑與 `..` 因此一起擋掉 -- 並把 `specs/`、`./specs` 正規化成 `specs` 再存。`main_branch` 會進 git 的參數列，限制在英數與 `. _ - /`。
+固定路徑要成立的前提是 `.loom/specs` 沒有被 `.gitignore` 蓋掉，這一點由 `commitStateChange` 的 `git add` 自己保證，見「目錄自我忽略」。
 
 ### 提示詞在 web UI 上可調
 
@@ -641,9 +641,9 @@ server 進程啟動時產生一個 `BOOT_ID`，SSE 的 `connected` 事件帶上�
 
 spec 固定放 `<repo>/.loom/specs/`。人可以直接在底下建 `<slug>/spec.md` 與 `<slug>/issues/NN-*.md`，不必經過「討論」分頁。
 
-**issue 檔沒有 front matter 時就地補一份 `status: draft`、`e2e: false`、`blocked_by: []`。** 補寫做在 `loadIssues` 裡，它是所有讀取路徑的共同入口 -- 另開一個 normalize 步驟就得在每個呼叫端記得先跑一次，漏掉一個就是一條讀到半形檔案的路徑。補上的內容不另外 commit：這條路徑包含唯讀的看板查詢，那份 front matter 由下一次狀態轉移的 `git add` 一併帶走。落點是 draft，所以補完也不會有東西自己跑起來。
+**issue 檔沒有 front matter 時就地補一份 `status: draft`、`e2e: false`、`blocked_by: []`。** 補寫做在 `loadIssues` 裡，它是所有讀取路徑的共同入口 -- 另開一個 normalize 步驟就得在每個呼叫端記得先跑一次，漏掉一個就是一條會讀到沒有 front matter 的檔案而炸掉的路徑。補上的內容不另外 commit：這條路徑包含唯讀的看板查詢，那份 front matter 由下一次狀態轉移的 `git add` 一併帶走。落點是 draft，所以補完也不會有東西自己跑起來。
 
-**不讀 body 裡的任何欄位。** 早期版本會讀 mattpocock/skills 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 有十一個 issue 狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by 的用途」），所以那種錯誤會安靜地等到第一次有 issue blocked 才發作，且症狀是「該擋的沒擋」。
+**不讀 body 裡的任何欄位。** 早期版本會讀 mattpocock/skills 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 有十一個 issue 狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by 只用來止血」），所以那種錯誤會安靜地等到第一次有 issue blocked 才發作，且症狀是「該擋的沒擋」。
 
 手寫的 issue 要宣告依賴就自己寫 front matter 的 `blocked_by`。正常執行照檔名編號序列走，編號排對了空著也能跑。
 

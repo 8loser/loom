@@ -132,9 +132,10 @@ export function writeSpecFrontMatter(raw: string, fm: SpecFrontMatter): string {
  * 人手寫丟進 specs 資料夾的 issue 檔沒有 front matter，loom 補一份最小的
  * 上去（見 DESIGN.md「人手寫的 spec」）。body 裡的任何欄位都不解讀 --
  * 想宣告依賴就自己寫 front matter 的 blocked_by。
+ *
+ * 是函式不是常數：回傳值會被放進 IssueFile 交出去，共用一份的話所有手寫
+ * issue 的 blockedBy 會是同一個陣列。
  */
-export const HANDWRITTEN_FRONT_MATTER: IssueFrontMatter = {
-  status: "draft",
-  e2e: false,
-  blockedBy: [],
-};
+export function handwrittenFrontMatter(): IssueFrontMatter {
+  return { status: "draft", e2e: false, blockedBy: [] };
+}

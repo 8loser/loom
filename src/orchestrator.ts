@@ -30,7 +30,7 @@ import {
   readSpecFrontMatter,
   writeSpecFrontMatter,
   bodyOf,
-  HANDWRITTEN_FRONT_MATTER,
+  handwrittenFrontMatter,
   MID_STATES,
   type IssueStatus,
   type SpecBlockedReason,
@@ -67,13 +67,12 @@ const INFRA_MAX_ATTEMPTS = 3;
 
 /**
  * spec 與 worktree 都固定放在 repo 內的 `.loom/` 底下（見 DESIGN.md
- * 「spec 資料夾」與「worktree 位置」），不是設定項。
+ * 「核心概念」與「git 拓撲」），不是設定項。
  *
  * `.loom/specs` 進版控 -- 狀態就寫在那些檔案的 front matter 裡，狀態轉移
  * 靠 commit 留痕。`.loom/worktrees` 必須被 gitignore。兩者同在 `.loom/`
  * 底下，所以 gitignore 只能寫 `.loom/worktrees/`：寫成 `.loom/` 會把 specs
- * 一起 ignore 掉，而 `git add` 對 ignored 路徑不報錯只是不加，狀態 commit
- * 會靜默消失。
+ * 一起 ignore 掉，而狀態 commit 靠 `git add .loom/specs` 落地。
  */
 export const SPECS_DIR = ".loom/specs";
 const WORKTREES_DIR = ".loom/worktrees";
@@ -253,11 +252,14 @@ function specBodyOf(ctx: Ctx, spec: string): string {
  * 沒有 front matter 的檔案就地補一份 draft 上去（見 DESIGN.md「人手寫的
  * spec」）。補寫放在這裡而不是另開一個 normalize 步驟，因為 loadIssues 是
  * 所有讀取路徑的共同入口 -- 分開就得在每個呼叫端記得先跑一次，漏掉一個就
- * 是一條讀到半形檔案的路徑。不在這裡 commit：這條路徑包含唯讀的看板查詢，
- * 補上的 front matter 由下一次狀態轉移的 `git add` 一併帶走。
+ * 是一條會讀到沒有 front matter 的檔案而炸掉的路徑。不在這裡 commit：這條
+ * 路徑包含唯讀的看板查詢，補上的 front matter 由下一次狀態轉移的 `git add`
+ * 一併帶走。
  *
- * spec 只有 spec.md、還沒有 issues/ 是合法的中間狀態（人手寫時先擺骨架），
- * 回空清單讓它顯示成 0 個 issue，不是錯誤。
+ * 還沒有 issues/ 目錄回空清單而不是讓 readdirSync 丟 ENOENT。這不會讓那個
+ * spec 變成合法狀態 -- aggregateSpecStatus 對空清單一樣會拋（見
+ * statemachine.ts），看板照樣標成 broken。差別只在人看到的是「spec has no
+ * issues to aggregate」而不是一串路徑不存在的 ENOENT。
  */
 export function loadIssues(ctx: Ctx, spec: string): IssueFile[] {
   const dir = join(specDir(ctx, spec), "issues");
@@ -270,7 +272,7 @@ export function loadIssues(ctx: Ctx, spec: string): IssueFile[] {
     let raw = readFileSync(path, "utf8");
     let fm = readIssueFrontMatter(raw);
     if (!fm) {
-      fm = HANDWRITTEN_FRONT_MATTER;
+      fm = handwrittenFrontMatter();
       raw = writeIssueFrontMatter(raw, fm);
       writeFileSync(path, raw);
     }
@@ -1146,7 +1148,7 @@ export function startScheduler(
       try {
         status = getSpecBoard(ctx, spec).status;
       } catch {
-        continue; // 尚未 import（沒有 front matter）或格式不對，交給匯入流程
+        continue; // 讀不出狀態的 spec（front matter 壞掉、沒有 issue）不排程，看板會標成 broken
       }
       if (DRIVEN_STATUSES.includes(status)) return spec;
     }

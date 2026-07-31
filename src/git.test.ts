@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -374,4 +374,51 @@ test("diffStatForReview lists files and line counts, using the same exclusions",
   assert.match(stat, /a\.ts/);
   assert.doesNotMatch(stat, /package-lock/);
   assert.doesNotMatch(stat, /export const a/, "a stat is file names and counts, not the content");
+});
+
+// DESIGN.md「worktree 位置」：worktree 開在 repo 內，那個目錄必須自我忽略，
+// 而忽略規則不能寬到蓋掉 .loom/specs -- 狀態 commit 靠那個路徑落地。
+// 這條測試盯的是兩者共存於 .loom/ 底下而不互相波及。
+test("ensureWorktree: repo 內的 worktree 自我忽略，主 checkout 保持乾淨且 specs 仍可 commit", () => {
+  const repo = initRepo();
+  const wt = join(repo, ".loom", "worktrees", "foo");
+  ensureWorktree(repo, wt, "spec/foo", "main");
+
+  assert.ok(existsSync(join(repo, ".loom", "worktrees", ".gitignore")));
+  const status = execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" });
+  assert.equal(status.trim(), "", "一整份 checkout 不該出現在主 repo 的 status 裡");
+
+  mkdirSync(join(repo, ".loom", "specs", "demo"), { recursive: true });
+  writeFileSync(join(repo, ".loom", "specs", "demo", "spec.md"), "merged: false\n");
+  const result = commitStateChange(repo, ".loom/specs", "demo -> created");
+  assert.equal(result.committed, true, "同一個 .loom/ 底下的 specs 不能被 worktrees 的忽略規則波及");
+});
+
+test("ensureWorktree: 已經有 .gitignore 就不覆寫", () => {
+  const repo = initRepo();
+  const wt = join(repo, ".loom", "worktrees", "foo");
+  const ignoreFile = join(repo, ".loom", "worktrees", ".gitignore");
+  mkdirSync(join(repo, ".loom", "worktrees"), { recursive: true });
+  writeFileSync(ignoreFile, "*\n# 使用者加的註解\n");
+
+  ensureWorktree(repo, wt, "spec/foo", "main");
+  assert.match(readFileSync(ignoreFile, "utf8"), /使用者加的註解/);
+});
+
+// 忽略規則寫太寬（`.loom/` 而不是 `.loom/worktrees/`）時，狀態 commit 必須
+// 響亮地失敗。`git add <明確路徑>` 對被 ignore 的新檔案會 exit 非 0，這條
+// 測試盯的就是它沒有退化成 `add -A` 那種靜默跳過。
+test("commitStateChange: specsDir 被 .gitignore 蓋到時拋錯，不是靜默回 committed:false", () => {
+  const repo = initRepo();
+  writeFileSync(join(repo, ".gitignore"), ".loom/\n");
+  sh(repo, "git", ["add", "-A"]);
+  sh(repo, "git", ["commit", "-q", "-m", "ignore .loom"]);
+
+  mkdirSync(join(repo, ".loom", "specs", "demo"), { recursive: true });
+  writeFileSync(join(repo, ".loom", "specs", "demo", "spec.md"), "merged: false\n");
+
+  assert.throws(
+    () => commitStateChange(repo, ".loom/specs", "demo -> created"),
+    /ignored by one of your .gitignore files/,
+  );
 });
