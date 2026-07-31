@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -94,6 +94,61 @@ test("templateVarsFor: coder gets the worktree's actual package.json scripts, no
   };
 
   assert.equal(templateVarsFor(request).scripts, "test: vitest run\nbuild: vite build");
+});
+
+test("templateVarsFor: context_md comes from the repo's .loom/context.md, not the worktree's", () => {
+  // agent 跑在純推理引擎模式下，這個檔案是專案規範進得了 prompt 的唯一管道，
+  // 而且刻意讀主 checkout 的版本：某條 spec branch 改了規範不該立刻對別條
+  // branch 的 coder 生效。兩邊都放檔案，斷言拿到的是 repo 那份。
+  const repoPath = mkdtempSync(join(tmpdir(), "loom-ctx-repo-"));
+  const worktreePath = mkdtempSync(join(tmpdir(), "loom-ctx-wt-"));
+  mkdirSync(join(repoPath, ".loom"), { recursive: true });
+  mkdirSync(join(worktreePath, ".loom"), { recursive: true });
+  writeFileSync(join(repoPath, ".loom", "context.md"), "from repo");
+  writeFileSync(join(worktreePath, ".loom", "context.md"), "from worktree");
+
+  const request: AgentRequest = {
+    role: "coder",
+    workspace: {
+      id: 1,
+      name: "w",
+      repoPath,
+      mainBranch: "main",
+      portRangeStart: 4300,
+      portRangeEnd: 4399,
+      parallelLimit: 2,
+    },
+    spec: "demo",
+    issue: "01",
+    worktreePath,
+    attempt: 1,
+  };
+
+  assert.equal(templateVarsFor(request).context_md, "from repo");
+});
+
+test("templateVarsFor: a missing .loom/context.md is an empty string, not a crash", () => {
+  // 沒有規範檔的專案照樣要跑得起來，模板留一個空的 <context> 區塊就好。
+  const dir = mkdtempSync(join(tmpdir(), "loom-ctx-none-"));
+
+  const request: AgentRequest = {
+    role: "coder",
+    workspace: {
+      id: 1,
+      name: "w",
+      repoPath: dir,
+      mainBranch: "main",
+      portRangeStart: 4300,
+      portRangeEnd: 4399,
+      parallelLimit: 2,
+    },
+    spec: "demo",
+    issue: "01",
+    worktreePath: dir,
+    attempt: 1,
+  };
+
+  assert.equal(templateVarsFor(request).context_md, "");
 });
 
 test("vendored templates keep the MIT attribution", () => {

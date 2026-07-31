@@ -211,9 +211,25 @@ function decideUnparseableOutcome(
 // 隔離 flag 的基底集合，跟 chat.ts 的長駐雙向 process 共用 -- 兩邊都得
 // 隔離個人環境（DESIGN.md「隔離個人環境」），只有一份維護，不是兩份可能
 // 漂移的複本。
+//
+// `--setting-sources ""` 是空清單：user / project / local 三層都不載入。
+// 立場是把 `claude -p` 當純推理引擎，進 agent 的東西只有 loom 自己組的
+// 提示詞（DESIGN.md「claude -p 當純推理引擎」）。實測（claude 2.1.220）
+// 這一顆 flag 同時決定四件事，沒有辦法分開：
+//
+//   | setting-sources | 全域 CLAUDE.md | 專案 CLAUDE.md | 專案 .claude/skills/ | 個人 hook |
+//   |-----------------|----------------|----------------|----------------------|-----------|
+//   | 預設（不帶）    | 載入           | 載入           | 可用                 | 觸發      |
+//   | project,local   | 不載入         | 載入           | 可用                 | 不觸發    |
+//   | local / ""      | 不載入         | 不載入         | 不可用               | 不觸發    |
+//
+// 要補能力回來是 `--plugin-dir <path>`（可重複，session-only），它不受
+// setting-sources 影響，實測在空清單下照樣載得到 plugin 的 skill。現在沒有
+// 這個需求所以不帶，要加的時候是往 isolationArgs 疊一組路徑，不是把
+// setting-sources 放寬。
 export const BASE_ISOLATION_FLAGS = [
   "--setting-sources",
-  "project,local",
+  "",
   "--strict-mcp-config",
   "--disable-slash-commands",
   "--permission-mode",

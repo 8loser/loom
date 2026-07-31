@@ -697,12 +697,6 @@ function renderSettings() {
       </div>
 
       <div class="grp">
-        <div class="grphd"><span class="label">檢查項</span></div>
-        ${field("CLAUDE.md", settings.checks.claudeMd ? "找到，agent 會自動載入" : "找不到", settings.checks.claudeMd ? "ro good" : "ro warn")}
-        ${field("CONTEXT.md", settings.checks.contextMd ? "找到" : "找不到，建議先跑 /domain-modeling", settings.checks.contextMd ? "ro good" : "ro warn")}
-      </div>
-
-      <div class="grp">
         <div class="grphd"><span class="label">專案指令</span><span class="aside">package.json</span></div>
         ${scriptRows}
         ${field("安裝", settings.install ?? "沒有 lockfile，跳過安裝", "ro")}

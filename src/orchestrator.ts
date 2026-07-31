@@ -77,6 +77,22 @@ const INFRA_MAX_ATTEMPTS = 3;
 export const SPECS_DIR = ".loom/specs";
 const WORKTREES_DIR = ".loom/worktrees";
 
+/**
+ * 專案背景進 agent 的唯一管道（見 DESIGN.md「agent 繼承什麼環境」）。
+ *
+ * agent 跑在純推理引擎模式下，`CLAUDE.md` 不會被自動載入，提示詞也不叫
+ * agent 自己去讀 `CONTEXT.md` 之類的檔案 -- 那等於讓環境決定它看到什麼。
+ * 要讓 agent 知道的事寫在這裡，loom 讀進來填成模板變數。
+ *
+ * 內容放什麼由使用者決定，loom 不規定也不解析 -- 提示詞只說「這是這個專案
+ * 要你先知道的事」，整份原樣塞進 `<context>` 區塊。
+ *
+ * 放 `.loom/` 底下而不是存 DB：跟 `SPECS_DIR` 同一個理由，進版控、跟著
+ * branch 走、協作者看得到、人可以直接編輯。沒有這個檔案時變數是空字串，
+ * 模板留一個空的 `<context>` 區塊，不是錯誤。
+ */
+export const CONTEXT_PATH = ".loom/context.md";
+
 export type AgentRole = "coder" | "issue_reviewer" | "spec_reviewer";
 
 export interface AgentRequest {

@@ -376,9 +376,8 @@ test("prompts: defaults are served until edited, edits stick, reset falls back t
   }
 });
 
-test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the project's scripts", async () => {
+test("settings: reports repo config and the project's scripts", async () => {
   const repoPath = initRepoWithDraftSpec();
-  writeFileSync(join(repoPath, "CLAUDE.md"), "# project rules\n");
   writeFileSync(
     join(repoPath, "package.json"),
     JSON.stringify({ name: "x", scripts: { dev: "vite", test: "vitest run", build: "tsc" } }),
@@ -394,7 +393,7 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the pr
 
     const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
     assert.equal(s.workspace.repoPath, repoPath);
-    assert.deepEqual(s.checks, { claudeMd: true, contextMd: false });
+    assert.equal(s.checks, undefined, "規範文件在不在不是設定頁的事");
     assert.deepEqual(
       s.scripts,
       { dev: "vite", test: "vitest run", build: "tsc" },
