@@ -282,7 +282,8 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
 
   // 設定頁上半部：專案路徑、spec 資料夾、限制，加上兩個純資訊性的檢查項
   // （DESIGN.md「不為詞彙表與規範文件開設定欄位」-- 只看有沒有，不是必填、
-  // 也不擋執行），以及專案 package.json 的 scripts 與 loom 會挑哪幾個來跑。
+  // 也不擋執行），以及專案 package.json 的 scripts、workspaces 展開出來的子
+  // package，與 loom 會挑哪幾個來跑。
   app.get("/api/workspaces/:name/settings", (c) => {
     const handle = handles.get(c.req.param("name"));
     if (!handle) return c.json({ error: "no such workspace" }, 404);
@@ -299,6 +300,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
       // 列出來而不是整包攤開：`ResolvedScripts` 是內部型別，日後在它上面加欄位
       // 不該連帶改變這個公開端點的形狀。
       scripts: resolved.scripts,
+      packages: resolved.packages,
       stages: resolved.stages,
       install: resolved.install,
       // 主分支欄的選項。

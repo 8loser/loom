@@ -648,7 +648,19 @@ function renderSettings() {
     Object.entries(settings.scripts)
       .map(([name, cmd]) => field(name, cmd, "ro"))
       .join("") || field("(沒有)", "package.json 裡沒有 scripts", "ro");
-  const willRun = Object.values(settings.stages).filter(Boolean);
+  // monorepo：子 package 只列 script 名稱，指令內容留給根層那份。一個 workspace
+  // 動輒十幾個 package，全展開的話設定頁會被指令字串淹掉。
+  const packageRows = settings.packages
+    .map((pkg) => field(pkg.dir, Object.keys(pkg.scripts).join("、"), "ro"))
+    .join("");
+  // 根層挑到的顯示 script 名稱（`e2e` 可能是 `test:e2e`，要看得出挑到哪個）；
+  // 子 package 挑到的顯示階段名加目錄，因為重點變成「跑了哪幾個 package」。
+  const willRun = Object.entries(settings.stages)
+    .filter(([, targets]) => targets.length > 0)
+    .map(([stage, targets]) => {
+      const dirs = targets.map((t) => t.dir).filter(Boolean);
+      return dirs.length > 0 ? `${stage}（${dirs.join("、")}）` : targets[0].script;
+    });
 
   const roleTabs = settings.roles
     .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)
@@ -659,7 +671,7 @@ function renderSettings() {
   el.innerHTML = `
     <div class="s-col">
       <h2>${esc(ws.name)}</h2>
-      <p class="lede">測試階段跑的是專案自己的 <code>package.json</code> script，loom 挑 <code>typecheck</code>、<code>test</code>、<code>e2e</code>，不必為 loom 另外加東西。改了那邊這裡自動跟上。</p>
+      <p class="lede">測試階段跑的是專案自己的 <code>package.json</code> script，loom 挑 <code>typecheck</code>、<code>test</code>、<code>e2e</code>，不必為 loom 另外加東西。改了那邊這裡自動跟上。monorepo 的話，根層沒有的階段會往 workspaces 的子 package 找，各自在自己的目錄跑。</p>
 
       ${field("專案路徑", ws.repoPath, "ro")}
       <!-- 固定位置、不是設定項，但要讓人看得到手寫的 spec 該放哪。 -->
@@ -700,6 +712,15 @@ function renderSettings() {
           willRun.length ? "ro good" : "ro warn",
         )}
       </div>
+
+      ${
+        packageRows
+          ? `<div class="grp">
+        <div class="grphd"><span class="label">子 package</span><span class="aside">workspaces</span></div>
+        ${packageRows}
+      </div>`
+          : ""
+      }
     </div>
 
     <div class="s-work">

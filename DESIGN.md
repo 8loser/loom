@@ -448,7 +448,7 @@ merge 按鈕已經是人的閘門，那些意見正好是按下去之前該讀�
 
 **loom 只保證 `PORT` 唯一，其餘隔離由專案的 script 負責。** 多個 spec 平行跑測試時，共用資源不只 port -- 本機資料庫、共用檔案、固定的瀏覽器 profile 都會互相污染。要獨立資料庫就從 `$PORT` 衍生一個名稱。隔離責任放在最清楚狀況的地方，loom 不需要理解任何專案的測試環境。真的隔離不了的專案把平行上限設 1。
 
-**實作在 `src/testrunner.ts`。** 認得的 script 是 `typecheck`、`test`、`e2e`（`e2e` 找不到時退回 `test:e2e`）；安裝指令一律由 lockfile 決定（`pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` / `package-lock.json`），沒有 lockfile 就不裝。
+**實作在 `src/testrunner.ts`。** 認得的 script 是 `typecheck`、`test`、`e2e`（`e2e` 找不到時退回 `test:e2e`）；安裝指令一律由 lockfile 決定（`pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` / `package-lock.json`），沒有 lockfile 就不裝。根層沒有某個階段的 script 時會往 workspaces 的子 package 找，見「執行指令由 package.json 提供」。
 
 typecheck 先跑：編譯不過就沒必要花時間跑後面兩段。
 
@@ -663,14 +663,20 @@ loom 認慣例名稱，專案不必為了 loom 新增任何 script：
 這樣解決三件事：
 
 - **設定漂移消失。** 這是「設定存 DB 不存 repo」唯一的已知代價。改測試工具就改那行 script，loom 自動跟上，不需要任何同步動作或偵測按鈕。
-- **monorepo 與非典型專案自然支援。** script 裡可以寫任何東西，例如 `pnpm --filter web test`，或先起 docker compose。
+- **非典型專案自然支援。** script 裡可以寫任何東西，例如先起 docker compose。
 - **零設定就能跑。** 這些名稱多數 Node 專案本來就有。要求專案先加幾行 `loom:*` 才會動的話，沒加的專案走的是「沒有可跑的東西 → `pass: true`」那條路，也就是契約沒人履行、而懲罰是假綠燈把 issue 推成 done。
+
+**monorepo：根層沒有的階段往子 package 找。** 根層有該階段的 script 就只跑根層 -- 專案自己寫的 `pnpm -r test` 或 `turbo run test` 是明確意圖，再遞迴一次等於同一批測試跑兩遍。根層沒有才展開 workspaces（`package.json` 的 `workspaces`，含 yarn v1 的 `{ packages: [...] }` 寫法；pnpm 則讀 `pnpm-workspace.yaml`），每個有該 script 的子 package 依目錄排序依序跑，各自以自己的目錄為 cwd，第一個紅的就停下並在 summary 裡標出是哪個 package。
+
+子 package 一律用 `npm run`，不去偵測套件管理器的遞迴語法（`pnpm -r` / `yarn workspaces foreach` / `npm --workspaces`）：`npm run` 只是讀那一份 `package.json` 的 scripts 再交給 sh，pnpm 那種 symlink 的 `node_modules/.bin` 一樣認得，而安裝早就在根層用 lockfile 選出的套件管理器做完了。安裝維持只在根層做一次，monorepo 本來就是這樣裝的。
+
+不做這件事的話，前後端分在 `apps/web`、`apps/api` 的專案在 loom 眼裡是「沒有 typecheck/test/e2e」，走的是 `pass: true` 那條路。那是所有假綠燈裡最貴的一種：看起來一切正常，實際上一行測試都沒跑。
 
 早期版本認的是 `loom:setup` / `loom:dev` / `loom:typecheck` / `loom:test` / `loom:e2e`，理由是 port 注入沒有通則（Vite 吃 `--port`，Next 吃 `-p`）。拿掉了：port 注入只有 loom 自己要起 dev server 時才是問題，而那件事本來就該由 e2e 框架做（見「測試階段跑什麼」）。loom 自己的 `package.json` 一個 `loom:*` 都沒有，跑的就是慣例名稱。
 
 代價：專案的 `test` 如果是 watch mode（`vitest` 不加 `run`），這裡會一路跑到逾時才被砍成 infra failure。症狀看得見，不是假綠燈，而 CI 本來也跑不了 watch mode，所以這種 script 早晚要改。
 
-壞掉的條件：非 Node 專案沒有 `package.json`。
+壞掉的條件：非 Node 專案沒有 `package.json`。`pnpm-workspace.yaml` 寫成 flow 形式（`packages: ['a', 'b']`）認不出來，會落回「不是 monorepo」-- 手寫解析只認 block 形式的清單，換不到為了一個欄位裝 YAML 依賴。
 
 ### 觀測
 
