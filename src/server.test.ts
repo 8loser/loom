@@ -376,9 +376,12 @@ test("prompts: defaults are served until edited, edits stick, reset falls back t
   }
 });
 
-test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the project's scripts", async () => {
+test("settings: reports repo config, whether loom's own context file exists, and the project's scripts", async () => {
   const repoPath = initRepoWithDraftSpec();
+  // 專案自己的 CLAUDE.md 存不存在對 loom 沒有意義（agent 看不到它），所以
+  // 設定頁只回報 .loom/context.md -- 那是規範進得了 agent 的唯一管道。
   writeFileSync(join(repoPath, "CLAUDE.md"), "# project rules\n");
+  writeFileSync(join(repoPath, ".loom", "context.md"), "# loom context\n");
   writeFileSync(
     join(repoPath, "package.json"),
     JSON.stringify({ name: "x", scripts: { dev: "vite", test: "vitest run", build: "tsc" } }),
@@ -394,7 +397,11 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the pr
 
     const s = await (await fetch(`${base}/api/workspaces/demo-ws/settings`)).json();
     assert.equal(s.workspace.repoPath, repoPath);
-    assert.deepEqual(s.checks, { claudeMd: true, contextMd: false });
+    assert.deepEqual(
+      s.checks,
+      { contextMd: true },
+      "只認 .loom/context.md：repo 根的 CLAUDE.md 在這個 fixture 裡也存在，但它不該被回報",
+    );
     assert.deepEqual(
       s.scripts,
       { dev: "vite", test: "vitest run", build: "tsc" },

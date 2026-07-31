@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { runClaude, type ClaudeRunResult } from "./claude.ts";
 import { readScripts, readWorkspacePackages } from "./testrunner.ts";
 import { DEFAULT_TEMPLATES, renderTemplate, type PromptRoleName } from "./prompts.ts";
-import { SPECS_DIR, type AgentRunner, type AgentRequest, type AgentResponse } from "./orchestrator.ts";
+import { SPECS_DIR, CONTEXT_PATH, type AgentRunner, type AgentRequest, type AgentResponse } from "./orchestrator.ts";
 
 /**
  * 模板從哪裡來。server 傳一個讀 DB 的實作進來（per-workspace 可編輯，見
@@ -97,6 +97,9 @@ export function templateVarsFor(req: AgentRequest): Record<string, string | unde
   return {
     spec: req.spec,
     spec_md: readOr(specMdPath),
+    // 從 repoPath 而不是 worktreePath 讀，跟 spec_md 一致：規範以主 checkout
+    // 的版本為準，不因為某條 spec branch 改了它就對別條 branch 的 coder 生效。
+    context_md: readOr(join(req.workspace.repoPath, CONTEXT_PATH)),
     issue_md: readOr(req.issuePath),
     diff: req.diff ?? "",
     last_failure: req.lastFailure ?? "",

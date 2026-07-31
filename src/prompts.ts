@@ -23,7 +23,7 @@ You are implementing exactly one issue from a spec, inside a git worktree, unatt
 
 # Before writing code
 
-Read \`CONTEXT.md\` (if it exists) so your names and vocabulary match the project's domain language, and respect any ADRs under \`docs/adr/\` in the area you're touching.
+If the \`<context>\` block below is not empty, it is this project's conventions and domain language. Match your names and vocabulary to it and follow what it says. Nothing else about this machine or repo is loaded for you; do not go hunting for convention files.
 
 # Test-Driven Development
 
@@ -59,6 +59,10 @@ Do not modify anything under the .loom/ directory -- orchestrator state lives th
 
 Report via the tool: whether the issue is actually complete, a one-line summary of what changed, and the list of files you changed.
 
+<context>
+{context_md}
+</context>
+
 <spec>
 {spec_md}
 </spec>
@@ -81,7 +85,7 @@ You are reviewing one completed issue. You see the diff and the issue/spec text 
 Review along two axes. A change can pass one and fail the other, so judge them separately and don't let one mask the other:
 
 - **Spec** -- does the diff faithfully implement what the issue asked for? Report requirements that are missing or partial, behaviour that wasn't asked for (scope creep), and requirements that look implemented but where the implementation looks wrong.
-- **Standards** -- does the code conform to this repo's documented standards (read \`CLAUDE.md\`, \`CONTEXT.md\`, \`CODING_STANDARDS.md\`, \`CONTRIBUTING.md\` if they exist), plus the smell baseline below.
+- **Standards** -- does the code conform to this project's documented standards, plus the smell baseline below. The standards are the \`<context>\` block below, and only that; if it is empty, judge on the smell baseline alone. Do not go looking for convention files in the repo.
 
 Also check tests: are there any, and do they test behavior rather than implementation details? A diff that only adds implementation-coupled or tautological tests is worse than one that adds none.
 
@@ -107,6 +111,10 @@ A fixed set of Fowler code smells that applies even when the repo documents noth
 Read the spec and issue below before judging. If the diff is empty, decide whether the issue was already satisfied by earlier work (pass) or nothing was actually done (reject).
 
 Report via the tool: a verdict of pass or reject, and if reject, the specific comments the next attempt needs to address. Quote the spec line or name the smell for each comment -- the next attempt only sees your comments, not this diff.
+
+<context>
+{context_md}
+</context>
 
 <spec>
 {spec_md}
@@ -152,7 +160,11 @@ Principles worth applying to what this spec built:
 - **The interface is the test surface.** If the tests reach past the interface, the module is probably the wrong shape.
 - **One adapter means a hypothetical seam. Two adapters means a real one.** A seam introduced with nothing varying across it is speculative generality.
 
-The spec and the whole branch's diff against {main_branch} are below. Read the individual issue files under the spec's issues directory too before commenting.
+The spec and the whole branch's diff against {main_branch} are below. Read the individual issue files under the spec's issues directory too before commenting. If the \`<context>\` block is not empty, it is this project's conventions; judge against those rather than looking for convention files in the repo.
+
+<context>
+{context_md}
+</context>
 
 <spec>
 {spec_md}
@@ -203,9 +215,9 @@ export type PromptRoleName = keyof typeof DEFAULT_TEMPLATES;
  * 檢查：模板用到的一定有宣告，宣告的一定填得出值。
  */
 export const TEMPLATE_VARIABLES: Record<PromptRoleName, string[]> = {
-  coder: ["spec", "spec_md", "issue_md", "last_failure", "base_sha", "attempt", "scripts"],
-  issue_reviewer: ["spec", "spec_md", "issue_md", "diff", "base_sha", "attempt"],
-  spec_reviewer: ["spec", "spec_md", "diff", "main_branch"],
+  coder: ["spec", "spec_md", "context_md", "issue_md", "last_failure", "base_sha", "attempt", "scripts"],
+  issue_reviewer: ["spec", "spec_md", "context_md", "issue_md", "diff", "base_sha", "attempt"],
+  spec_reviewer: ["spec", "spec_md", "context_md", "diff", "main_branch"],
   chat: ["repo_path"],
 };
 

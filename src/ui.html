@@ -698,8 +698,7 @@ function renderSettings() {
 
       <div class="grp">
         <div class="grphd"><span class="label">檢查項</span></div>
-        ${field("CLAUDE.md", settings.checks.claudeMd ? "找到，但 agent 不會載入" : "找不到", "ro")}
-        ${field("CONTEXT.md", settings.checks.contextMd ? "找到" : "找不到，建議先跑 /domain-modeling", settings.checks.contextMd ? "ro good" : "ro warn")}
+        ${field(".loom/context.md", settings.checks.contextMd ? "找到，會填進 agent 的提示詞" : "找不到，agent 拿不到專案規範", settings.checks.contextMd ? "ro good" : "ro warn")}
       </div>
 
       <div class="grp">

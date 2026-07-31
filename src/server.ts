@@ -35,6 +35,7 @@ import {
   createSpecFromDraft,
   startScheduler,
   createLiveOutputStore,
+  CONTEXT_PATH,
   type Ctx,
   type Scheduler,
   type AgentRunner,
@@ -291,9 +292,11 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     const resolved = resolveScripts(ws.repoPath);
     return c.json({
       workspace: ws,
+      // 只看 loom 自己的 context 檔。`CLAUDE.md`／`CONTEXT.md` 不再檢查：
+      // agent 跑在純推理引擎模式下看不到它們，報告它們在不在只會讓人以為
+      // 那些規範有生效（見 DESIGN.md「agent 繼承什麼環境」）。
       checks: {
-        claudeMd: existsSync(join(ws.repoPath, "CLAUDE.md")),
-        contextMd: existsSync(join(ws.repoPath, "CONTEXT.md")),
+        contextMd: existsSync(join(ws.repoPath, CONTEXT_PATH)),
       },
       // 哪個階段挑到哪個 script 是 testrunner.ts 的事，這裡不重寫一份判斷 --
       // 否則改了候選名稱要改兩個地方，而設定頁挑錯一個沒人會發現。欄位一個個
