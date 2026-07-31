@@ -376,12 +376,12 @@ test("prompts: defaults are served until edited, edits stick, reset falls back t
   }
 });
 
-test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the loom:* scripts it actually read", async () => {
+test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the project's scripts", async () => {
   const repoPath = initRepoWithDraftSpec();
   writeFileSync(join(repoPath, "CLAUDE.md"), "# project rules\n");
   writeFileSync(
     join(repoPath, "package.json"),
-    JSON.stringify({ name: "x", scripts: { "loom:dev": "vite --port $PORT", "loom:test": "vitest run", build: "tsc" } }),
+    JSON.stringify({ name: "x", scripts: { dev: "vite", test: "vitest run", build: "tsc" } }),
   );
 
   const { loom, base, httpServer } = await startTestServer({ agent: stubAgent() });
@@ -397,13 +397,13 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the lo
     assert.deepEqual(s.checks, { claudeMd: true, contextMd: false });
     assert.deepEqual(
       s.scripts,
-      { "loom:dev": "vite --port $PORT", "loom:test": "vitest run" },
-      "only scripts loom knows about, not every script the project happens to have (build is ignored)",
+      { dev: "vite", test: "vitest run", build: "tsc" },
+      "the settings page lists every script the project has, not a loom-specific subset",
     );
     assert.deepEqual(
-      s.scriptNames,
-      ["loom:setup", "loom:typecheck", "loom:dev", "loom:test", "loom:e2e"],
-      "the page renders this list, so it must come from devserver.ts rather than being hardcoded in ui.html",
+      s.stages,
+      { typecheck: null, test: "test", e2e: null },
+      "which script each stage picked comes from testrunner.ts rather than being decided in ui.html",
     );
     // 設定頁把主分支畫成選單，選項得從這裡來。spec 資料夾固定成 .loom/specs
     // 之後不是設定項，所以這個回應裡既沒有那一欄也沒有資料夾清單。

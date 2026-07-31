@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import type { Db, RunUsage, Role, Workspace } from "./db.ts";
 import type { LiveEvent } from "./claude.ts";
-import { allocatePort } from "./devserver.ts";
+import { allocatePort } from "./testrunner.ts";
 import {
   startRun,
   finishRun,

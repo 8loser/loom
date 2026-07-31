@@ -1157,7 +1157,7 @@
 
       <div class="sheet">
         <h2>clinic-web</h2>
-        <p class="lede">要跑的指令寫在專案自己的 <span class="mono">package.json</span> 裡，loom 只認 <span class="mono">loom:</span> 開頭的 script。改了那邊這裡自動跟上。</p>
+        <p class="lede">測試階段跑的是專案自己的 <span class="mono">package.json</span> script，loom 挑 <span class="mono">typecheck</span>、<span class="mono">test</span>、<span class="mono">e2e</span>，不必為 loom 另外加東西。改了那邊這裡自動跟上。</p>
 
         <div class="field"><span class="label">專案路徑</span><span class="in">~/workspaces/clinic-web</span></div>
         <div class="field"><span class="label">spec 資料夾</span><span class="in">specs/</span></div>
@@ -1171,13 +1171,15 @@
 
         <div class="grp">
           <div class="grphd">
-            <span class="label">讀到的指令</span>
+            <span class="label">專案指令</span>
             <span style="font-size:11.5px; color:var(--muted); margin-left:auto;">package.json</span>
           </div>
-          <div class="field"><span class="label">loom:setup</span><span class="in ro">pnpm install --frozen-lockfile</span></div>
-          <div class="field"><span class="label">loom:dev</span><span class="in ro">vite --port $PORT</span></div>
-          <div class="field"><span class="label">loom:test</span><span class="in ro">vitest run</span></div>
-          <div class="field"><span class="label">loom:e2e</span><span class="in ro">playwright test</span></div>
+          <div class="field"><span class="label">dev</span><span class="in ro">vite</span></div>
+          <div class="field"><span class="label">typecheck</span><span class="in ro">tsc --noEmit</span></div>
+          <div class="field"><span class="label">test</span><span class="in ro">vitest run</span></div>
+          <div class="field"><span class="label">test:e2e</span><span class="in ro">playwright test</span></div>
+          <div class="field"><span class="label">安裝</span><span class="in ro">pnpm install --frozen-lockfile</span></div>
+          <div class="field"><span class="label">測試階段會跑</span><span class="in ro" style="color:var(--ok)">typecheck、test、test:e2e</span></div>
         </div>
 
         <div class="grp">

@@ -168,7 +168,7 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 | 分支 | 一個 spec 一條 `spec/<name>`，一個 worktree |
 | worktree 位置 | `<repo>/.loom/worktrees/<spec>`，目錄自帶 `.gitignore`（內容 `*`）不讓它弄髒主 checkout |
 | issue 執行順序 | 同 spec 依編號序列，跨 spec 平行；有 issue 卡住時用 `Blocked by` 判斷哪些後續仍可做 |
-| 平行上限 | 預設 2。每個跑動的 spec 佔一個 worktree、一份依賴、可能一個 dev server、一個 claude process |
+| 平行上限 | 預設 2。每個跑動的 spec 佔一個 worktree、一份依賴、一個 claude process，測試期間可能再多一個測試自己起的 server |
 | merge 粒度 | spec 全綠才一次 merge 回 main，人工觸發 |
 | coder 交棒時 | **orchestrator 代 commit**，見下節 |
 | 每個 issue 完成後 | rebase spec branch 到最新 main，衝突就寫 `blocked_reason: rebase_conflict` |
@@ -206,7 +206,7 @@ git clean -fd
 
 `git reset --hard` 不刪 untracked 的新檔，也不中止進行中的 rebase。崩潰恢復與 domain 第三次「從乾淨狀態重寫」宣稱的乾淨，只有加上 `rebase --abort` 與 `clean -fd` 才成立。少了 `clean -fd`，agent 死在半路留下的新檔會被下一輪 coder 繼承，而且因為是 untracked，`git diff` 看不到、reviewer 也看不到。
 
-**worktree 在 spec merged 之後回收。** 不回收的話每個跑過的 spec 留下一份完整 checkout 加一份 `loom:setup` 裝出來的依賴，平行上限只限制同時跑幾個、不限制累積幾個。磁碟滿之後 `loom:setup` 與 git 操作開始失敗，被歸成 setup 失敗直接 blocked，早上看到一排像是 agent 做壞的 blocked，根因是磁碟。
+**worktree 在 spec merged 之後回收。** 不回收的話每個跑過的 spec 留下一份完整 checkout 加一份裝出來的依賴，平行上限只限制同時跑幾個、不限制累積幾個。磁碟滿之後安裝與 git 操作開始失敗，被歸成 setup 失敗直接 blocked，早上看到一排像是 agent 做壞的 blocked，根因是磁碟。
 
 ### 多個 spec 平行時的三個交互點
 
@@ -440,25 +440,23 @@ merge 按鈕已經是人的閘門，那些意見正好是按下去之前該讀�
 
 整批做完才驗證的問題不是省時間，是錯誤在序列鏈上會複利：issue 03 壞了但在 07 做完才發現，中間四個 issue 全建立在壞基礎上。而且 reviewer 讀七個 issue 疊起來的 diff，品質會明顯掉。
 
-### dev server 生命週期
+### 測試階段跑什麼
 
-由 orchestrator 管理，不交給 agent。
+進入 testing 時：依 lockfile 裝依賴（agent 可能加了新的）、跑 `typecheck`、跑 `test`、必要時跑 `e2e`，每個指令都自成一個 process group，逾時就整組收掉。
 
-進入 testing 時：跑 `loom:setup`（多數時候 no-op，但 agent 可能加了新依賴）、起 `loom:dev`、輪詢 `http://127.0.0.1:$PORT/` 直到有回應、跑 `loom:test` 以及必要時的 `loom:e2e`、殺掉整個 process group。
+**loom 不起 dev server。** 需要 server 的測試由測試指令自己起 -- Playwright 的 `webServer` 就是做這件事，而且它自己負責關掉。loom 起一份的話等於要求專案再宣告一個「給 loom 用的 dev 指令」，還要 loom 去猜每個框架怎麼吃 port，而 e2e 框架早就有這個功能。
 
-**每次進 testing 都重起 server，不跨 issue 重用。** HMR 未必涵蓋 config 變更、新增依賴、build-time 產物，重用會讓 issue 02 的測試跑在 issue 01 的 bundle 上。省下的幾十秒不值得這種假綠燈。
+**loom 只保證 `PORT` 唯一，其餘隔離由專案的 script 負責。** 多個 spec 平行跑測試時，共用資源不只 port -- 本機資料庫、共用檔案、固定的瀏覽器 profile 都會互相污染。要獨立資料庫就從 `$PORT` 衍生一個名稱。隔離責任放在最清楚狀況的地方，loom 不需要理解任何專案的測試環境。真的隔離不了的專案把平行上限設 1。
 
-**loom 只保證 `PORT` 唯一，其餘隔離由專案的 script 負責。** 多個 spec 平行跑測試時，共用資源不只 port -- 本機資料庫、共用檔案、固定的瀏覽器 profile 都會互相污染。要獨立資料庫就在 `loom:setup` 裡用 `$PORT` 衍生一個名稱。隔離責任放在最清楚狀況的地方，loom 不需要理解任何專案的測試環境。真的隔離不了的專案把平行上限設 1。
+**實作在 `src/testrunner.ts`。** 認得的 script 是 `typecheck`、`test`、`e2e`（`e2e` 找不到時退回 `test:e2e`）；安裝指令一律由 lockfile 決定（`pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` / `package-lock.json`），沒有 lockfile 就不裝。
 
-**實作在 `src/devserver.ts`。** 認得的 script 是 `loom:setup`、`loom:typecheck`、`loom:dev`、`loom:test`、`loom:e2e`，後四者找不到時退回慣例名稱（`typecheck`、`dev`、`test`）；沒有 `loom:setup` 時依 lockfile 決定安裝指令（`pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` / `package-lock.json`）。
+typecheck 先跑：編譯不過就沒必要花時間跑後面兩段。
 
-typecheck 跑在起 dev server 之前：編譯不過就沒必要花幾十秒起一個 server。
+**回傳值分三種，不是兩種。** `pass: true`；`failure: "domain"`（測試真的紅了，退回 implementing）；`failure: "infra"`（安裝失敗、任何一段超時，照失敗與重試的表格直接 blocked）。混成一種的話，一次基礎設施故障會吃掉 coder 改 code 的三次機會，而且第三次會觸發三階段清除把已經寫好的東西整個丟掉。
 
-**回傳值分三種，不是兩種。** `pass: true`；`failure: "domain"`（測試真的紅了，退回 implementing）；`failure: "infra"`（setup 失敗、任何一段超時、dev server 起不來，照失敗與重試的表格直接 blocked）。混成一種的話，一次基礎設施故障會吃掉 coder 改 code 的三次機會，而且第三次會觸發三階段清除把已經寫好的東西整個丟掉。
+**「沒有可跑的東西」（沒有 `package.json`、沒有 typecheck/test/e2e script）回傳 `pass: true`**，但 output 明確寫出是哪一種並存進 `runs.summary`。這是刻意的取捨：非 Node 專案不該讓整條流水線卡死，但也不該讓人以為測試真的跑過。設定頁的「測試階段會跑」那一欄同時把這件事標成警告，讓人在派工之前就看得到。**worktree 目錄根本不存在則是拋錯**讓排程器停住 -- 那是環境壞了，不是「這個專案沒有測試」，兩者都走 `pass` 的話 issue 會在沒有程式碼可測的情況下變成 done。
 
-**「沒有可跑的東西」（沒有 `package.json`、沒有 typecheck/test/e2e script）回傳 `pass: true`**，但 output 明確寫出是哪一種並存進 `runs.summary`。這是刻意的取捨：非 Node 專案、還沒加 `loom:*` script 的專案不該讓整條流水線卡死，但也不該讓人以為測試真的跑過。**worktree 目錄根本不存在則是拋錯**讓排程器停住 -- 那是環境壞了，不是「這個專案沒有測試」，兩者都走 `pass` 的話 issue 會在沒有程式碼可測的情況下變成 done。
-
-process 生命週期不交給 LLM 的理由：agent 超時被殺、自己崩掉、忘記 kill，server 就變孤兒佔住 port，症狀出現在下一個不相干的 spec 上，而且要手動 `lsof` 才找得到。orchestrator 是唯一確定知道「這一輪結束了」的角色。
+process 生命週期不交給 LLM 的理由：agent 超時被殺、自己崩掉、忘記 kill，spawn 出來的東西就變孤兒佔住 port，症狀出現在下一個不相干的 spec 上，而且要手動 `lsof` 才找得到。orchestrator 是唯一確定知道「這一輪結束了」的角色，所以測試指令由它 spawn、由它 kill 整個 process group。
 
 ### 失敗時的資訊傳遞
 
@@ -633,7 +631,7 @@ seam 已定義在下面 spec 的 Testing Decisions，照那個做，不要自己
 
 ### loom 自己的開發迴圈
 
-跟「dev server 生命週期」無關，那節講的是**專案的** server。`npm run dev` 用 Node 內建的 `--watch` 監看 `src/`，改動自動重啟。
+`npm run dev` 用 Node 內建的 `--watch` 監看 `src/`，改動自動重啟。這是 loom 自己這個 server，跟被編排的專案怎麼起 server 沒有關係（見「測試階段跑什麼」）。
 
 server 進程啟動時產生一個 `BOOT_ID`，SSE 的 `connected` 事件帶上它。server 重啟後瀏覽器的 `EventSource` 本來就會自動重連，前端發現 `bootId` 換了就 `location.reload()`。這樣改 `ui.html`（它是 `readFileSync` 讀的，不在 import 圖譜上，所以要 `--watch-path=src` 才追得到）不用手動重整，而且不需要另外接一套 hot reload 通道。一般手動重啟 server 也會觸發前端重載，那是對的行為：舊 UI 配新後端就是該重載。
 
@@ -651,26 +649,26 @@ spec 固定放 `<repo>/.loom/specs/`。人可以直接在底下建 `<slug>/spec.
 
 ### 執行指令由 package.json 提供
 
-loom 認固定的 script 名稱：
+loom 認慣例名稱，專案不必為了 loom 新增任何 script：
 
-```json
-"scripts": {
-  "loom:setup": "pnpm install --frozen-lockfile",
-  "loom:dev":   "vite --port $PORT",
-  "loom:test":  "vitest run",
-  "loom:e2e":   "playwright test"
-}
-```
+| 階段 | 取哪個 |
+| --- | --- |
+| 安裝 | 由 lockfile 決定（`pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` / `package-lock.json`），沒有就不裝 |
+| typecheck | `typecheck` |
+| test | `test` |
+| e2e | `e2e`，沒有就 `test:e2e` |
 
-執行時 `PORT` 由 orchestrator 放進環境變數。找不到 `loom:*` 就退回慣例：`dev`、`test`、依 lockfile 決定安裝指令。健康檢查是輪詢 `http://127.0.0.1:$PORT/` 直到有回應。
+執行時 `PORT` 由 orchestrator 放進環境變數，要不要用它起一個 server 是指令自己的事。
 
 這樣解決三件事：
 
-- **port 注入沒有通則。** Vite 吃 `--port`，Next 吃 `-p`，有些框架讀 `PORT` 環境變數。寫在 script 裡由專案自己決定，loom 不需要知道任何框架的差異。
 - **設定漂移消失。** 這是「設定存 DB 不存 repo」唯一的已知代價。改測試工具就改那行 script，loom 自動跟上，不需要任何同步動作或偵測按鈕。
-- **monorepo 與非典型專案自然支援。** script 裡可以寫任何東西，例如 `pnpm --filter web dev`，或先起 docker compose。
+- **monorepo 與非典型專案自然支援。** script 裡可以寫任何東西，例如 `pnpm --filter web test`，或先起 docker compose。
+- **零設定就能跑。** 這些名稱多數 Node 專案本來就有。要求專案先加幾行 `loom:*` 才會動的話，沒加的專案走的是「沒有可跑的東西 → `pass: true`」那條路，也就是契約沒人履行、而懲罰是假綠燈把 issue 推成 done。
 
-代價是每個專案要在 `package.json` 加四行。這不算引入新的設定系統，scripts 是本來就存在的東西，而且它 git-tracked，跟著專案走。
+早期版本認的是 `loom:setup` / `loom:dev` / `loom:typecheck` / `loom:test` / `loom:e2e`，理由是 port 注入沒有通則（Vite 吃 `--port`，Next 吃 `-p`）。拿掉了：port 注入只有 loom 自己要起 dev server 時才是問題，而那件事本來就該由 e2e 框架做（見「測試階段跑什麼」）。loom 自己的 `package.json` 一個 `loom:*` 都沒有，跑的就是慣例名稱。
+
+代價：專案的 `test` 如果是 watch mode（`vitest` 不加 `run`），這裡會一路跑到逾時才被砍成 infra failure。症狀看得見，不是假綠燈，而 CI 本來也跑不了 watch mode，所以這種 script 早晚要改。
 
 壞掉的條件：非 Node 專案沒有 `package.json`。
 
@@ -682,7 +680,7 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 
 **實作現況：** `claude.ts` 的 `runClaude` 有給 `onEvent` 才切換成 `--output-format stream-json --verbose` 逐行解析，沒給就維持既有的 `--output-format json` 一次性路徑，行為不變。事件粒度是「一個 assistant 內容區塊」，不追蹤 token-level 的 partial delta、不等 tool_result 回來（那些只換得到 tool_use_id 對應的額外狀態，換不到「看得懂 agent 在幹嘛」這個目標）。orchestrator 用一個純記憶體的 `LiveOutputStore`（key 是 run id）暫存，run 一結束就 `clear()`，完全不落地，跟上面「完整輸出不落地」一致。
 
-接上的有 coder、issue_reviewer、以及測試階段的 `loom:*` 指令（`devserver.ts` 透過同一條管線報 `kind:"port"` 與跑了哪個 script）。spec_reviewer 與 spec 層的 e2e 沒接：它們的 issue 是 null，看板目前沒有它們的顯示位置。
+接上的有 coder、issue_reviewer、以及測試階段的指令（`testrunner.ts` 透過同一條管線報 `kind:"port"` 與跑了哪個 script）。spec_reviewer 與 spec 層的 e2e 沒接：它們的 issue 是 null，看板目前沒有它們的顯示位置。
 
 **事件形狀已實測**（`claude-stream.test.ts`，預設 SKIP，`ORC_TEST_REAL_CLAUDE=1` 才跑）：`assistant` 事件的 `message.content[]` 會有 `thinking` / `text` / `tool_use` 三種區塊，工具名稱就是 `Read`、`Edit`、`Bash` 這些原名，`Read` 的 `input.file_path` 是絕對路徑。`--json-schema` 強迫呼叫的 `StructuredOutput` 也會以 `tool_use` 出現，那是 loom 自己要求的回報動作不是 agent 在做事，轉發時濾掉。
 

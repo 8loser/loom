@@ -38,9 +38,9 @@ export type StreamEvent = ResultEvent | RateLimitEvent | { type: string; [k: str
 // token-level 的 partial delta（沒帶 --include-partial-messages），也不等
 // tool_result 回來 -- 呼叫本身發生的當下就夠讓人看懂 agent 在幹嘛，等結果
 // 只是多一層狀態要追蹤（tool_use_id 對應），換不到看板需要的東西。
-// "port" 不是 claude 產生的，是 devserver.ts 起 dev server 時發的（看板要顯示
-// 「連線埠」欄位）。共用同一條管線是因為它跟工具呼叫一樣是「這一輪 run 期間
-// 發生的事」，另外拉一條 store 只為了一個數字不划算。
+// "port" 不是 claude 產生的，是 testrunner.ts 把這一輪分配到的 PORT 交給測試
+// 指令時發的（看板要顯示「連線埠」欄位）。共用同一條管線是因為它跟工具呼叫
+// 一樣是「這一輪 run 期間發生的事」，另外拉一條 store 只為了一個數字不划算。
 export type LiveEventKind = "say" | "read" | "edit" | "bash" | "search" | "tool" | "port";
 
 export interface LiveEvent {

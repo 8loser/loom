@@ -22,7 +22,7 @@ import {
 } from "./db.ts";
 import { createClaudeAgentRunner, ROLE_SCHEMAS } from "./agent.ts";
 import { DEFAULT_TEMPLATES, TEMPLATE_VARIABLES, type PromptRoleName } from "./prompts.ts";
-import { createDevServerTestRunner, readKnownScripts, KNOWN_SCRIPT_NAMES } from "./devserver.ts";
+import { createTestRunner, resolveScripts } from "./testrunner.ts";
 import { sendChatMessage, finalizeChatDraft, stopAllChatProcesses } from "./chat.ts";
 import { listBranches } from "./git.ts";
 import {
@@ -135,7 +135,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
         createClaudeAgentRunner({
           templates: (workspaceId, role) => getPrompt(db, workspaceId, role) ?? DEFAULT_TEMPLATES[role],
         }),
-      test: opts.test ?? createDevServerTestRunner(),
+      test: opts.test ?? createTestRunner(),
       // 每個即時輸出事件都直接觸發 broadcast，讓「即時輸出」名副其實 --
       // board 端點本來就便宜（SQLite 查詢，沒有重運算），這個 tool call
       // 等級的頻率換不到值得另外做節流的成本。
@@ -282,7 +282,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
 
   // 設定頁上半部：專案路徑、spec 資料夾、限制，加上兩個純資訊性的檢查項
   // （DESIGN.md「不為詞彙表與規範文件開設定欄位」-- 只看有沒有，不是必填、
-  // 也不擋執行），以及從專案 package.json 實際讀到的 loom:* 指令。
+  // 也不擋執行），以及專案 package.json 的 scripts 與 loom 會挑哪幾個來跑。
   app.get("/api/workspaces/:name/settings", (c) => {
     const handle = handles.get(c.req.param("name"));
     if (!handle) return c.json({ error: "no such workspace" }, 404);
@@ -293,10 +293,9 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
         claudeMd: existsSync(join(ws.repoPath, "CLAUDE.md")),
         contextMd: existsSync(join(ws.repoPath, "CONTEXT.md")),
       },
-      // 認得哪些 script 是 devserver.ts 的事，這裡不重寫一份判斷 -- 否則
-      // 加一個階段（例如 typecheck）要改兩個地方，而設定頁少列一個沒人會發現。
-      scriptNames: KNOWN_SCRIPT_NAMES,
-      scripts: readKnownScripts(ws.repoPath),
+      // 哪個階段挑到哪個 script 是 testrunner.ts 的事，這裡不重寫一份判斷 --
+      // 否則改了候選名稱要改兩個地方，而設定頁挑錯一個沒人會發現。
+      ...resolveScripts(ws.repoPath),
       // 主分支欄的選項。
       branches: listBranches(ws.repoPath),
     });

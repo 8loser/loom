@@ -637,23 +637,24 @@ function renderSettings() {
   const ws = settings.workspace;
   const role = settings.roles.find((r) => r.role === promptRole) ?? settings.roles[0];
 
-  // 名稱清單由後端給（devserver.ts 的 SCRIPTS 是唯一來源），不在前端再寫一份。
-  // 固定列 loom:* 那幾個，加上專案實際定義的慣例退回名稱（typecheck/dev/test）。
-  const scriptNames = [...new Set([...settings.scriptNames, ...Object.keys(settings.scripts)])];
-  const scriptRows = scriptNames
-    .map((name) => field(name, settings.scripts[name] ?? "未定義", "ro"))
-    .join("");
+  // 專案有哪些 script 就列哪些，哪個階段挑到哪個由後端算（testrunner.ts 的
+  // SCRIPTS 是唯一來源），前端不再寫一份判斷。
+  const scriptRows =
+    Object.entries(settings.scripts)
+      .map(([name, cmd]) => field(name, cmd, "ro"))
+      .join("") || field("(沒有)", "package.json 裡沒有 scripts", "ro");
+  const willRun = ["typecheck", "test", "e2e"].map((stage) => settings.stages[stage]).filter(Boolean);
 
   const roleTabs = settings.roles
     .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)
     .join("");
 
   // 左欄可編輯的只有 DB 裡那幾欄設定；虛線框的是唯讀的環境資訊（專案路徑、
-  // 檢查項、讀到的指令），外觀差異本身就說明了哪些能改，不用另外寫。
+  // 檢查項、專案指令），外觀差異本身就說明了哪些能改，不用另外寫。
   el.innerHTML = `
     <div class="s-col">
       <h2>${esc(ws.name)}</h2>
-      <p class="lede">要跑的指令寫在專案自己的 <code>package.json</code> 裡，loom 只認 <code>loom:</code> 開頭的 script。改了那邊這裡自動跟上。</p>
+      <p class="lede">測試階段跑的是專案自己的 <code>package.json</code> script，loom 挑 <code>typecheck</code>、<code>test</code>、<code>e2e</code>，不必為 loom 另外加東西。改了那邊這裡自動跟上。</p>
 
       ${field("專案路徑", ws.repoPath, "ro")}
       <!-- 固定位置、不是設定項，但要讓人看得到手寫的 spec 該放哪。 -->
@@ -685,8 +686,14 @@ function renderSettings() {
       </div>
 
       <div class="grp">
-        <div class="grphd"><span class="label">讀到的指令</span><span class="aside">package.json</span></div>
+        <div class="grphd"><span class="label">專案指令</span><span class="aside">package.json</span></div>
         ${scriptRows}
+        ${field("安裝", settings.install ?? "沒有 lockfile，跳過安裝", "ro")}
+        ${field(
+          "測試階段會跑",
+          willRun.length ? willRun.join("、") : "沒有 typecheck/test/e2e，測試會直接算過",
+          willRun.length ? "ro good" : "ro warn",
+        )}
       </div>
     </div>
 
@@ -1073,8 +1080,8 @@ function renderIssueDetail(spec, issue) {
     if (live.attempt > 1) rows.push(`<dt class="label">嘗試</dt><dd class="warnish">第 ${live.attempt} / ${spec.domainMaxAttempts} 次</dd>`);
     if (live.diffStat) rows.push(`<dt class="label">目前 diff</dt><dd><span style="color:var(--ok)">+${live.diffStat.insertions}</span> <span style="color:var(--crit)">-${live.diffStat.deletions}</span></dd>`);
   }
-  // dev server 的 port 是 devserver.ts 用一個 kind:"port" 事件報上來的，
-  // 跟工具呼叫走同一條管線（見 claude.ts 的 LiveEventKind）。
+  // 這一輪測試指令拿到的 PORT，是 testrunner.ts 用一個 kind:"port" 事件報上來
+  // 的，跟工具呼叫走同一條管線（見 claude.ts 的 LiveEventKind）。
   const portEvent = live?.liveEvents.findLast((e) => e.kind === "port");
   if (portEvent) rows.push(`<dt class="label">連線埠</dt><dd>${esc(portEvent.text)}</dd>`);
   if (retries) rows.push(`<dt class="label">重試</dt><dd${issue.status === "blocked" ? ' class="critish"' : ""}>domain ${retries.domain} / ${spec.domainMaxAttempts} · infra ${retries.infra} / ${spec.infraMaxAttempts}</dd>`);

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { runClaude, type ClaudeRunResult } from "./claude.ts";
-import { readScripts } from "./devserver.ts";
+import { readScripts } from "./testrunner.ts";
 import { DEFAULT_TEMPLATES, renderTemplate, type PromptRoleName } from "./prompts.ts";
 import { SPECS_DIR, type AgentRunner, type AgentRequest, type AgentResponse } from "./orchestrator.ts";
 

@@ -10,8 +10,8 @@ import { runUntilIdle, loadIssues, SPECS_DIR, type Ctx, type TestRunner } from "
 import { createClaudeAgentRunner } from "./agent.ts";
 
 // 真的端到端：真的 claude -p 當 coder 跟 issue_reviewer，真的 git worktree，
-// 只有 testing 階段（loom:test/e2e 的執行本身）維持 stub，那是另一塊還沒做
-// 的範圍（dev server、port 分配）。花真的錢，預設 SKIP，設
+// 只有 testing 階段（專案自己的 test/e2e 指令的執行本身）維持 stub，那一塊由
+// testrunner.test.ts 用真的 subprocess 蓋。花真的錢，預設 SKIP，設
 // ORC_TEST_REAL_CLAUDE=1 才跑。用 haiku 壓低成本，任務刻意設計得很小。
 const RUN_REAL = process.env.ORC_TEST_REAL_CLAUDE === "1";
 const scratchRoot = join(process.env.CLAUDE_JOB_DIR ?? ".", "tmp", "e2e-real-test");
