@@ -961,7 +961,7 @@ function renderGrid() {
   if (!currentWs) {
     grid.innerHTML = emptyNote(
       "加一個 workspace 開始",
-      "loom 要一個 git repo，加上 repo 裡放 spec 的資料夾。執行時它在獨立的 worktree 裡跑 agent，不動你的工作目錄。",
+      `loom 只要一個 git repo。spec 放在 repo 裡的 ${SPECS_DIR}/，執行時它在獨立的 worktree 裡跑 agent，不動你的工作目錄。`,
       "選一個 repo 資料夾", "e-open-newws");
     $("e-open-newws").addEventListener("click", openNewWorkspace);
     return;

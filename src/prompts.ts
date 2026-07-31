@@ -55,7 +55,7 @@ The project's own \`package.json\` scripts are below -- use them instead of gues
 
 Run typechecking and the relevant test files yourself. Don't hand over red.
 
-Do not modify anything under the specs directory -- orchestrator state lives there and only the orchestrator writes to it.
+Do not modify anything under the .loom/ directory -- orchestrator state lives there and only the orchestrator writes to it.
 
 Report via the tool: whether the issue is actually complete, a one-line summary of what changed, and the list of files you changed.
 
