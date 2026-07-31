@@ -486,6 +486,9 @@ let workspaces = [];
 let currentWs = null;
 let board = null; // 目前 workspace 最近一次抓到的 board 回應
 let selection = null; // {type:'spec', spec} | {type:'issue', spec, issue} | null
+// 哪幾條折疊列是展開的（"draft" / "merged"）。放在 renderBoard 外面：那個
+// 函式每次都重建 grid 的 innerHTML，狀態存在 DOM 裡會被下一次 render 洗掉。
+const openFolds = new Set();
 let liveTimer = null;
 let tab = "board"; // 'board' | 'chat' | 'settings'
 let settings = null; // 設定分頁最近一次抓到的 /settings 與 /prompts
@@ -981,7 +984,7 @@ function renderGrid() {
       <span class="br">讀不出來 · ${esc(spec.error ?? "")}</span>
     </div>`).join("");
 
-  const specRows = active.map((spec) => {
+  const renderSpecs = (list) => list.map((spec) => {
     const specClass = selection?.type === "spec" && selection.spec === spec.spec ? "a-spec on" : "a-spec";
     const header = `<button class="${specClass}" type="button" data-spec="${esc(spec.spec)}">
       <span class="nm">${esc(spec.spec)}</span>
@@ -997,17 +1000,25 @@ function renderGrid() {
       .join("");
     return header + rows;
   }).join("");
+  const specRows = renderSpecs(active);
 
-  const foldRow = (label, list) => list.length ? `<button class="fold" type="button">
-      <span class="tw" aria-hidden="true">▸</span>
+  // 展開後長得跟進行中的 lane 一樣（spec header 加 issue 卡片），點卡片一樣
+  // 打開右邊的詳情 -- 那些 click 走 document 層的委派，不需要另外綁。收合時
+  // 才把 spec 名列在標題旁，展開後名字已經在卡片上了。
+  const foldRow = (key, label, list) => {
+    if (!list.length) return "";
+    const open = openFolds.has(key);
+    return `<button class="fold" type="button" data-fold="${key}" aria-expanded="${open}">
+      <span class="tw" aria-hidden="true">${open ? "▾" : "▸"}</span>
       <span class="ttl">${label} ${list.length}</span>
-      <span class="names">${list.map((s) => esc(s.spec)).join(" · ")}</span>
-    </button>` : "";
-  const folds = foldRow("草稿", drafts) + foldRow("已合併", mergedList);
+      <span class="names">${open ? "" : list.map((s) => esc(s.spec)).join(" · ")}</span>
+    </button>` + (open ? renderSpecs(list) : "");
+  };
+  const folds = foldRow("draft", "草稿", drafts) + foldRow("merged", "已合併", mergedList);
 
   let empty = "";
   if (board.specs.length === 0) {
-    empty = emptyNote("還沒有 spec", "到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>也可以自己在 ${SPECS_DIR}/ 底下建資料夾手寫，loom 會掃到並收成草稿。", "去討論", "e-goto-chat");
+    empty = emptyNote("還沒有 spec", `到「討論」描述想做什麼。loom 會產出 spec 並切成 issue，你確認之後才開始執行。<br>也可以自己在 ${SPECS_DIR}/ 底下建資料夾手寫，loom 會掃到並收成草稿。`, "去討論", "e-goto-chat");
   } else if (active.length === 0) {
     empty = emptyNote("沒有進行中的 spec", "全部是草稿或已合併。定稿之後才會開始跑。", "去討論", "e-goto-chat");
   }
@@ -1270,6 +1281,15 @@ document.addEventListener("click", async (e) => {
       say(`${act} 失敗：${err.message}`);
     }
     await refresh();
+    return;
+  }
+
+  const fold = e.target.closest(".fold[data-fold]");
+  if (fold) {
+    const key = fold.dataset.fold;
+    if (openFolds.has(key)) openFolds.delete(key);
+    else openFolds.add(key);
+    render();
     return;
   }
 
