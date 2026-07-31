@@ -287,6 +287,7 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     const handle = handles.get(c.req.param("name"));
     if (!handle) return c.json({ error: "no such workspace" }, 404);
     const ws = handle.ctx.workspace;
+    const resolved = resolveScripts(ws.repoPath);
     return c.json({
       workspace: ws,
       checks: {
@@ -294,8 +295,12 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
         contextMd: existsSync(join(ws.repoPath, "CONTEXT.md")),
       },
       // 哪個階段挑到哪個 script 是 testrunner.ts 的事，這裡不重寫一份判斷 --
-      // 否則改了候選名稱要改兩個地方，而設定頁挑錯一個沒人會發現。
-      ...resolveScripts(ws.repoPath),
+      // 否則改了候選名稱要改兩個地方，而設定頁挑錯一個沒人會發現。欄位一個個
+      // 列出來而不是整包攤開：`ResolvedScripts` 是內部型別，日後在它上面加欄位
+      // 不該連帶改變這個公開端點的形狀。
+      scripts: resolved.scripts,
+      stages: resolved.stages,
+      install: resolved.install,
       // 主分支欄的選項。
       branches: listBranches(ws.repoPath),
     });

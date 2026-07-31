@@ -403,8 +403,9 @@ test("settings: reports repo config, the CLAUDE.md/CONTEXT.md checks, and the pr
     assert.deepEqual(
       s.stages,
       { typecheck: null, test: "test", e2e: null },
-      "which script each stage picked comes from testrunner.ts rather than being decided in ui.html",
+      "which script each stage picked comes from testrunner.ts, so adding a stage does not need a ui.html edit",
     );
+    assert.equal(s.install, null, "no lockfile in this fixture, and the settings page renders that as 跳過安裝");
     // 設定頁把主分支畫成選單，選項得從這裡來。spec 資料夾固定成 .loom/specs
     // 之後不是設定項，所以這個回應裡既沒有那一欄也沒有資料夾清單。
     assert.deepEqual(s.branches, ["main"]);

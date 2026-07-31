@@ -643,7 +643,7 @@ function renderSettings() {
     Object.entries(settings.scripts)
       .map(([name, cmd]) => field(name, cmd, "ro"))
       .join("") || field("(沒有)", "package.json 裡沒有 scripts", "ro");
-  const willRun = ["typecheck", "test", "e2e"].map((stage) => settings.stages[stage]).filter(Boolean);
+  const willRun = Object.values(settings.stages).filter(Boolean);
 
   const roleTabs = settings.roles
     .map((r) => `<button class="prole" data-role="${esc(r.role)}" aria-current="${r.role === role.role}">${esc(r.role)}</button>`)

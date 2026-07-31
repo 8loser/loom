@@ -27,7 +27,7 @@ test("allocatePort: returns a port in range, and skips one that's already bound"
   try {
     const port = await allocatePort(4310, 4312);
     assert.notEqual(port, 4310, "4310 is taken, allocatePort must move on");
-    assert.ok(port >= 4310 && port <= 4312);
+    assert.ok(port >= 4310 && port <= 4312, `a port outside the workspace's range would collide with another workspace: ${port}`);
   } finally {
     await new Promise((resolve) => held.close(resolve));
   }
@@ -62,7 +62,7 @@ test("no package.json and no test script both report pass with output saying not
 
   const noScript = await runner.runIssueTests(ctxFor(repoWith({ build: "true" }), 4321));
   assert.equal(noScript.pass, true);
-  assert.match(noScript.output, /no typecheck\/test\/e2e script/);
+  assert.match(noScript.output, /no typecheck\/test script/);
 
   const noE2E = await runner.runSpecE2E(ctxFor(repoWith({ test: "true" }), 4322));
   assert.equal(noE2E.pass, true);
@@ -111,10 +111,10 @@ test("a script that hangs is killed at the timeout rather than blocking the sche
   assert.match(result.output, /timed out/);
 });
 
-// DESIGN.md「失敗與重試」的表格分兩類 infra：subprocess 非零退出是「原地
-// 重跑」，超時是「直接 blocked」。orchestrator 靠 failure 欄位分流，混在一起
-// 的話一次基礎設施故障會吃掉 coder 的三次改 code 機會，而且第三次會觸發三階段
-// 清除把已完成的工作全部丟掉。
+// DESIGN.md「失敗與重試」的表格分兩類：測試真的紅了是 domain（退回 implementing
+// 讓 coder 再改一次），環境問題是 infra（直接 blocked）。orchestrator 靠 failure
+// 欄位分流，混在一起的話一次基礎設施故障會吃掉 coder 的三次改 code 機會，而且
+// 第三次會觸發三階段清除把已完成的工作全部丟掉。
 test("timeouts are infra failures, a red test is a domain failure", async () => {
   const runner = createTestRunner({ scriptTimeoutMs: 1200 });
 
@@ -127,7 +127,43 @@ test("timeouts are infra failures, a red test is a domain failure", async () => 
   const hungTypecheck = await runner.runIssueTests(
     ctxFor(repoWith({ typecheck: `node -e "setTimeout(()=>{}, 60000)"`, test: "true" }), 4334),
   );
-  assert.equal(hungTypecheck.failure, "infra");
+  assert.equal(hungTypecheck.failure, "infra", "every stage classifies the same way, not just the test stage");
+});
+
+// 逾時只是 infra 的一種。指令根本 spawn 不起來（npm 不在 PATH、worktree 權限
+// 壞掉）同樣是環境問題，判成 domain 的話 coder 會被派去修一個不存在的 bug。
+test("a command that cannot even be spawned is an infra failure, not a red test", async () => {
+  const dir = repoWith({ test: "true" });
+  const realPath = process.env.PATH;
+  process.env.PATH = mkdtempSync(join(scratchRoot, "empty-path-"));
+  try {
+    const result = await createTestRunner().runIssueTests(ctxFor(dir, 4347));
+    assert.equal(result.pass, false);
+    assert.equal(result.failure, "infra", "npm missing is the machine's problem, not the coder's");
+    assert.match(result.output, /spawn error/);
+  } finally {
+    process.env.PATH = realPath;
+  }
+});
+
+// DESIGN.md「失敗與重試」把安裝失敗列為 infra 的第一個成因。裝不起來的話後面
+// 每個階段都會用一棵半殘的依賴樹跑，紅了也不是 coder 的錯。
+test("a failing install is an infra failure and short-circuits both entry points", async () => {
+  const marker = join(mkdtempSync(join(scratchRoot, "marker-")), "test-ran.txt");
+  const scripts = { test: `node -e "require('fs').writeFileSync('${marker}', 'x')"`, e2e: "true" };
+  const runner = createTestRunner({ scriptTimeoutMs: 60_000 });
+
+  const dir = repoWith(scripts);
+  writeFileSync(join(dir, "package-lock.json"), "not json at all");
+  const issue = await runner.runIssueTests(ctxFor(dir, 4348));
+  assert.equal(issue.failure, "infra", "npm ci against a broken lockfile is an environment fault");
+  assert.match(issue.output, /setup failed/);
+  assert.equal(existsSync(marker), false, "a broken install must not let tests run against a half-installed tree");
+
+  const specDir = repoWith(scripts);
+  writeFileSync(join(specDir, "package-lock.json"), "not json at all");
+  const spec = await runner.runSpecE2E(ctxFor(specDir, 4349));
+  assert.equal(spec.failure, "infra", "the spec-level e2e path classifies install failure the same way");
 });
 
 test("typecheck runs first, and a type error fails without ever running the tests", async () => {
@@ -233,6 +269,46 @@ test("a flaky e2e passes on its automatic second run; unit tests get no such ret
     1,
     "unit tests are deterministic, retrying them just hides a real failure",
   );
+});
+
+// 重跑本身掛住是環境問題。判成 domain 的話一次卡死的重跑會吃掉一格改 code 的
+// 額度，而 coder 收到的是一份沒有任何測試失敗訊息的「測試紅了」。
+test("an e2e retry that hangs is an infra failure, not a second red run", async () => {
+  const counter = join(mkdtempSync(join(scratchRoot, "counter-")), "runs.txt");
+  // 第一次紅，第二次掛住不退出。
+  const script = `node -e "const f=require('fs');const n=(f.existsSync('${counter}')?+f.readFileSync('${counter}','utf8'):0)+1;f.writeFileSync('${counter}',String(n));if(n>1){setTimeout(()=>{},60000)}else{console.error('first run red');process.exit(1)}"`;
+  const ctx = { ...ctxFor(repoWith({ e2e: script }), 4350), e2e: true };
+  const result = await createTestRunner({ scriptTimeoutMs: 1200 }).runIssueTests(ctx);
+
+  assert.equal(result.pass, false);
+  assert.equal(result.failure, "infra", "a hung retry is the environment, not the coder");
+  assert.match(result.output, /timed out/);
+});
+
+// DESIGN.md「成功的階段也算」-- 安裝跑過就該在 summary 裡看得到，否則「裝了什麼
+// 版本」這個線索在依賴相關的失敗上就沒了。
+test("a successful install leaves its output in the summary alongside the test stages", async () => {
+  const dir = repoWith({ test: `node -e "console.log('UNIT OK')"` });
+  writeFileSync(join(dir, "package-lock.json"), JSON.stringify({ name: "probe", lockfileVersion: 3, packages: {} }));
+  const result = await createTestRunner({ scriptTimeoutMs: 60_000 }).runIssueTests(ctxFor(dir, 4351));
+
+  assert.equal(result.pass, true);
+  assert.match(result.output, /UNIT OK/);
+  assert.ok(
+    result.output.split("UNIT OK")[0].trim().length > 0,
+    `the install stage ran but left nothing in the summary: ${JSON.stringify(result.output)}`,
+  );
+});
+
+// e2e 只有 issue 宣告了才跑，所以「沒東西可跑」這句話要照這一輪的實際範圍講 --
+// 它會原封不動存進 runs.summary，寫成「沒有 e2e script」是假的。
+test("the nothing-to-run message does not claim an e2e script is missing when the issue never asked for one", async () => {
+  const dir = repoWith({ e2e: "true", build: "true" });
+  const plain = await createTestRunner().runIssueTests(ctxFor(dir, 4352));
+
+  assert.equal(plain.pass, true);
+  assert.match(plain.output, /no typecheck\/test script/);
+  assert.doesNotMatch(plain.output, /e2e/, "this issue was never going to run e2e, so its absence is not the reason");
 });
 
 // 安裝指令沒有 script 可以宣告，一律由 lockfile 決定。

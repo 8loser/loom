@@ -736,7 +736,7 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 | review 意見寫進 issue 檔案的 `## Comments` | skills 有這個慣例，但每次重試都往 git-tracked 檔案加文字，commit 會吵。想在 loom 外面讀得到歷史時再換 |
 | 兩層狀態同步（spec 也有完整狀態機） | 不加。spec 狀態一律由 issue 聚合算出 |
 | 多 provider 抽象層 | 要接非 Claude 的執行體 |
-| 指令設定欄位（setup / dev / test / e2e / health） | 要接沒有 `package.json` 的專案 |
+| 指令設定欄位（安裝 / typecheck / test / e2e） | 要接沒有 `package.json` 的專案 |
 | 讀外部工具的狀態詞彙（skills 的 `Status:` / `Blocked by:`） | 不加，理由見「人手寫的 spec」 |
 | 可設定的 spec 資料夾 | 不加。固定 `.loom/specs`，換位置的自由度換不到那條路徑驗證與整套設定 UI 的成本 |
 | 已合併 spec 搬進 `spec_archived` | 不加。`merged: true` 已經是狀態的唯一事實來源，搬移會讓所在位置變成第二個來源，而 DB 記錄與重名檢查都以資料夾名為 key |
