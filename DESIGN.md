@@ -63,6 +63,8 @@ loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 
 
 沒有這個檔案時 `{context_md}` 是空字串，模板留一個空的 `<context>` 區塊，agent 照樣跑，reviewer 退回只用 smell baseline 判斷。設定頁不回報它在不在：寫不寫是使用者的事，沒有它也不擋執行，多一個欄位只是多一個要維護的東西。
 
+**只有讀，沒有寫。** loom 沒有任何角色寫得了這個檔案：coder 的提示詞禁止碰 `.loom/`（那條規則是為了保護 orchestrator 狀態），chat 的提示詞禁止改任何檔案。要建立或更新就人自己編輯，它在 repo 裡，跟改任何一個 markdown 檔一樣。這是刻意的，理由與代價記在「明確不做」。
+
 **詞彙表路徑仍然寫在提示詞裡**，而提示詞可編輯 -- 路徑本身就是設定。另開欄位等於同一件事有兩個地方可以改，遲早不一致。
 
 人在終端機用他的 plugin 手動跑 `/to-spec` 產 spec，loom 照樣讀得到那些檔案，兩者不衝突。
@@ -746,7 +748,8 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 | 內嵌 `wayfinder` | 不加。它是規劃階段，看板不該同時裝決策票和實作票 |
 | coder 的重試專用模板（含 `diagnosing-bugs`） | 重試品質被證明不夠時 |
 | 詞彙表與規範文件的路徑欄位 | 不加。路徑寫在可編輯的提示詞裡，agent 有 Read 工具 |
-| per-workspace 的規範欄位 | 純推理引擎關掉 `CLAUDE.md` 之後，coder 沒有 per-repo 規範管道。產出品質被證明因此變差時再加 |
+| 讓 agent 寫 `.loom/context.md` | 不加。人用編輯器改，它就在 repo 裡。無人值守的 coder 一路上發現的東西沒有人在旁邊判斷值不值得寫進去，而寫錯的背景會影響之後每一個 spec。要補的話走 chat 角色（人在場、有討論脈絡），並且得先把 coder 那條「不准碰 `.loom/`」改寫成只保護 `.loom/specs` |
+| `.loom/context.md` 的過期偵測 | 不加。真正的風險不是不好更新，是過期而沒有人發現。等真的踩到再看要什麼訊號，現在猜不準 |
 | 讓人編輯 `--json-schema` | 不加。改壞了整條流水線停擺且症狀難查 |
 | review 意見寫進 issue 檔案的 `## Comments` | skills 有這個慣例，但每次重試都往 git-tracked 檔案加文字，commit 會吵。想在 loom 外面讀得到歷史時再換 |
 | 兩層狀態同步（spec 也有完整狀態機） | 不加。spec 狀態一律由 issue 聚合算出 |
