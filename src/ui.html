@@ -315,7 +315,12 @@
   .field select.in { width: 100%; box-sizing: border-box; color: var(--text); }
   .field .in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .field .pair { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
-  .field .pair input.in { width: 8ch; }
+  /* 原本固定 8ch 放不下 5 位數的 port：padding、border 之外還有 number 的
+     原生 spinner 要扣，實測只剩三位數看得到。改成兩個輸入框平分右欄，寬度
+     就不必去算；spinner 一併收掉，範圍兩端用點的沒有意義，而它佔的寬度是
+     這欄唯一的餘裕來源。 */
+  .field .pair input.in { flex: 1; min-width: 0; appearance: textfield; }
+  .field .pair input.in::-webkit-inner-spin-button { appearance: none; margin: 0; }
   /* 可輸入也可瀏覽的路徑欄。輸入框吃掉剩下的寬度，按鈕維持自己的大小。 */
   .field .pick { display: flex; align-items: center; gap: 6px; }
   .field .pick input.in { min-width: 0; }
