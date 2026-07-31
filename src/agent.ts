@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { runClaude, type ClaudeRunResult } from "./claude.ts";
-import { readScripts } from "./testrunner.ts";
+import { readScripts, readWorkspacePackages } from "./testrunner.ts";
 import { DEFAULT_TEMPLATES, renderTemplate, type PromptRoleName } from "./prompts.ts";
 import { SPECS_DIR, type AgentRunner, type AgentRequest, type AgentResponse } from "./orchestrator.ts";
 
@@ -72,13 +72,23 @@ function readOr(path: string | undefined, fallback = ""): string {
   }
 }
 
-/** package.json 的全部 scripts 攤成一行一個給 coder 讀，省得每次都重查一遍。 */
+/**
+ * package.json 的全部 scripts 攤成一行一個給 coder 讀，省得每次都重查一遍。
+ *
+ * monorepo 的子 package 也列，前面標目錄。只給根層那份的話，coder 要在
+ * `apps/web` 底下跑什麼還是得自己翻 -- 而它翻到的未必是測試階段實際會跑的
+ * 那一個，正好是這段 prompt 要避免的猜測。
+ */
 function formatScripts(worktreePath: string): string {
   const scripts = readScripts(worktreePath);
   if (!scripts) return "";
-  return Object.entries(scripts)
-    .map(([name, command]) => `${name}: ${command}`)
-    .join("\n");
+  const lines = Object.entries(scripts).map(([name, command]) => `${name}: ${command}`);
+  for (const pkg of readWorkspacePackages(worktreePath)) {
+    for (const [name, command] of Object.entries(pkg.scripts)) {
+      lines.push(`${pkg.dir}/ ${name}: ${command}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /** 模板變數的唯一來源。prompts.test.ts 用它檢查設定頁宣告的變數都填得出值。 */

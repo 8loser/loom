@@ -17,6 +17,17 @@ function repoWith(scripts: Record<string, string>): string {
   return dir;
 }
 
+/** 根層 package.json 加幾個子 package，用來測 workspaces 展開。 */
+function monorepoWith(root: object, packages: Record<string, Record<string, string>>): string {
+  const dir = mkdtempSync(join(scratchRoot, "mono-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "root", private: true, ...root }, null, 2));
+  for (const [sub, scripts] of Object.entries(packages)) {
+    mkdirSync(join(dir, sub), { recursive: true });
+    writeFileSync(join(dir, sub, "package.json"), JSON.stringify({ name: sub.replace("/", "-"), scripts }, null, 2));
+  }
+  return dir;
+}
+
 function ctxFor(dir: string, port: number, events: LiveEvent[] = []) {
   return { worktreePath: dir, port, onEvent: (e: LiveEvent) => events.push(e) };
 }
@@ -342,6 +353,42 @@ test("the install command comes from whichever lockfile is present, and is skipp
   );
 });
 
+// monorepo 的執行面：每個有該 script 的 package 都要真的跑到，而且要在自己的
+// 目錄跑（`npm run` 讀的是那一份 package.json）。
+test("each workspace package runs in its own directory, in a stable order", async () => {
+  const dir = monorepoWith({ workspaces: ["apps/*"] }, {
+    "apps/web": { test: `node -e "console.log('ran in ' + process.cwd())"` },
+    "apps/api": { test: `node -e "console.log('ran in ' + process.cwd())"` },
+  });
+  const events: LiveEvent[] = [];
+  const result = await createTestRunner().runIssueTests(ctxFor(dir, 4353, events));
+
+  assert.equal(result.pass, true);
+  assert.match(result.output, /ran in .*apps\/api/, "the api package's script ran with its own directory as cwd");
+  assert.match(result.output, /ran in .*apps\/web/, "and so did the web package's -- not just the first one found");
+  assert.deepEqual(
+    events.filter((e) => e.kind === "bash").map((e) => e.text),
+    ["npm run test (apps/api)", "npm run test (apps/web)"],
+    "the board's live feed says which package each command belongs to",
+  );
+});
+
+// runs.summary 是 coder 下一輪 prompt 帶的東西。三份 npm ERR! 疊在一起而不說是
+// 誰紅的，coder 得自己猜要改哪個目錄。
+test("a red workspace package names itself in the summary, and stops the stage", async () => {
+  const marker = join(mkdtempSync(join(scratchRoot, "marker-")), "web-ran.txt");
+  const dir = monorepoWith({ workspaces: ["apps/*"] }, {
+    "apps/api": { test: `node -e "console.error('API RED'); process.exit(1)"` },
+    "apps/web": { test: `node -e "require('fs').writeFileSync('${marker}', 'x')"` },
+  });
+  const result = await createTestRunner().runIssueTests(ctxFor(dir, 4354));
+
+  assert.equal(result.failure, "domain", "a red test in a sub-package is still the coder's problem");
+  assert.match(result.output, /API RED/);
+  assert.match(result.output, /apps\/api/, "without the package name the coder cannot tell which one to fix");
+  assert.equal(existsSync(marker), false, "the stage stops at the first red package, like every other stage");
+});
+
 // 設定頁顯示的是這份，判斷不在 ui.html 裡重寫一次。
 test("resolveScripts reports the project's scripts alongside which one each stage picked", () => {
   const dir = repoWith({ typecheck: "tsc", test: "vitest run", "test:e2e": "playwright test", build: "vite build" });
@@ -349,11 +396,76 @@ test("resolveScripts reports the project's scripts alongside which one each stag
   const resolved = resolveScripts(dir);
 
   assert.equal(resolved.scripts.build, "vite build", "the full script list is what the settings page lists");
-  assert.deepEqual(resolved.stages, { typecheck: "typecheck", test: "test", e2e: "test:e2e" });
+  assert.deepEqual(resolved.stages, {
+    typecheck: [{ dir: "", script: "typecheck" }],
+    test: [{ dir: "", script: "test" }],
+    e2e: [{ dir: "", script: "test:e2e" }],
+  });
+  assert.deepEqual(resolved.packages, [], "a single-package repo has no workspaces to show");
   assert.match(resolved.install ?? "", /^yarn install/);
 
   const bare = resolveScripts(mkdtempSync(join(scratchRoot, "bare-")));
   assert.deepEqual(bare.scripts, {}, "a project with no package.json still renders, it just has nothing to show");
-  assert.deepEqual(bare.stages, { typecheck: null, test: null, e2e: null });
+  assert.deepEqual(bare.stages, { typecheck: [], test: [], e2e: [] });
   assert.equal(bare.install, null);
+});
+
+// monorepo：根層沒有該階段的 script 時往 workspaces 的子 package 找。不這樣做
+// 的話前後端分目錄的專案在 loom 眼裡是「沒有 typecheck/test/e2e」，測試階段直接
+// 算過 -- 那是所有靜默綠燈裡最貴的一種。
+test("resolveScripts falls back to workspace packages for stages the root does not define", () => {
+  const dir = monorepoWith({ workspaces: ["apps/*"] }, {
+    "apps/web": { typecheck: "tsc", test: "vitest run", e2e: "playwright test" },
+    "apps/api": { typecheck: "tsc", test: "vitest run" },
+  });
+  const resolved = resolveScripts(dir);
+
+  assert.deepEqual(resolved.stages.typecheck, [
+    { dir: "apps/api", script: "typecheck" },
+    { dir: "apps/web", script: "typecheck" },
+  ], "every package that has the script runs, in a stable order");
+  assert.deepEqual(resolved.stages.e2e, [{ dir: "apps/web", script: "e2e" }], "only the package that has it");
+  assert.deepEqual(
+    resolved.packages.map((p) => p.dir),
+    ["apps/api", "apps/web"],
+    "the settings page lists the workspace packages it found",
+  );
+});
+
+// 專案自己寫的 `pnpm -r test` / `turbo run test` 是明確意圖。loom 再往子 package
+// 遞迴一次的話同一批測試會跑兩遍，時間翻倍而且第二遍的紅綠沒有新資訊。
+test("a root script wins over the workspace packages instead of running both", () => {
+  const dir = monorepoWith({ workspaces: ["apps/*"], scripts: { test: "turbo run test" } }, {
+    "apps/web": { test: "vitest run" },
+  });
+  const resolved = resolveScripts(dir);
+
+  assert.deepEqual(resolved.stages.test, [{ dir: "", script: "test" }], "the root aggregate is the whole stage");
+});
+
+// pnpm 的 workspace 清單不在 package.json 裡。認不出來的話 pnpm monorepo 會
+// 落回「沒有 script」那條路徑，也就是靜默算過。
+test("pnpm-workspace.yaml is recognised as the workspace declaration", () => {
+  const dir = monorepoWith({}, { "packages/core": { test: "vitest run" } });
+  writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n  # 註解不該被當成 pattern\n");
+
+  assert.deepEqual(resolveScripts(dir).stages.test, [{ dir: "packages/core", script: "test" }]);
+});
+
+// yarn v1 的 workspaces 是 `{ packages: [...] }`，不是字串陣列。
+test("the yarn v1 object form of workspaces is recognised too", () => {
+  const dir = monorepoWith({ workspaces: { packages: ["packages/*"] } }, { "packages/core": { test: "vitest run" } });
+
+  assert.deepEqual(resolveScripts(dir).stages.test, [{ dir: "packages/core", script: "test" }]);
+});
+
+// 依賴自己帶的 package.json 不是這個 repo 的 workspace。`**` 這種 pattern 沒有
+// 排除 node_modules 的話，一個 workspace 會擴張成整棵依賴樹。
+test("node_modules is never mistaken for a workspace package", () => {
+  const dir = monorepoWith({ workspaces: ["**"] }, {
+    "apps/web": { test: "vitest run" },
+    "node_modules/left-pad": { test: "should never run" },
+  });
+
+  assert.deepEqual(resolveScripts(dir).stages.test, [{ dir: "apps/web", script: "test" }]);
 });

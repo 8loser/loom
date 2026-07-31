@@ -47,7 +47,7 @@ TDD is the red -> green loop.
 
 # Before you finish
 
-The project's own \`package.json\` scripts are below -- use them instead of guessing a package manager or a command that doesn't exist in this repo.
+The project's own \`package.json\` scripts are below -- use them instead of guessing a package manager or a command that doesn't exist in this repo. Lines prefixed with a directory belong to that workspace package; run them from that directory.
 
 <scripts>
 {scripts}
