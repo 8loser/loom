@@ -35,7 +35,6 @@ import {
   createSpecFromDraft,
   startScheduler,
   createLiveOutputStore,
-  CONTEXT_PATH,
   type Ctx,
   type Scheduler,
   type AgentRunner,
@@ -281,10 +280,12 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     }
   });
 
-  // 設定頁上半部：專案路徑、spec 資料夾、限制，加上兩個純資訊性的檢查項
-  // （DESIGN.md「不為詞彙表與規範文件開設定欄位」-- 只看有沒有，不是必填、
-  // 也不擋執行），以及專案 package.json 的 scripts、workspaces 展開出來的子
-  // package，與 loom 會挑哪幾個來跑。
+  // 設定頁上半部：專案路徑、spec 資料夾、限制，以及專案 package.json 的
+  // scripts、workspaces 展開出來的子 package，與 loom 會挑哪幾個來跑。
+  //
+  // 規範文件不在這裡回報。`.loom/context.md` 是使用者自己要不要寫的檔案，
+  // 沒有它 agent 照樣跑（模板留一個空的 <context> 區塊），設定頁報告它在不
+  // 在只是多一個要維護的欄位。
   app.get("/api/workspaces/:name/settings", (c) => {
     const handle = handles.get(c.req.param("name"));
     if (!handle) return c.json({ error: "no such workspace" }, 404);
@@ -292,12 +293,6 @@ export function createServer(opts: CreateServerOptions = {}): LoomServer {
     const resolved = resolveScripts(ws.repoPath);
     return c.json({
       workspace: ws,
-      // 只看 loom 自己的 context 檔。`CLAUDE.md`／`CONTEXT.md` 不再檢查：
-      // agent 跑在純推理引擎模式下看不到它們，報告它們在不在只會讓人以為
-      // 那些規範有生效（見 DESIGN.md「agent 繼承什麼環境」）。
-      checks: {
-        contextMd: existsSync(join(ws.repoPath, CONTEXT_PATH)),
-      },
       // 哪個階段挑到哪個 script 是 testrunner.ts 的事，這裡不重寫一份判斷 --
       // 否則改了候選名稱要改兩個地方，而設定頁挑錯一個沒人會發現。欄位一個個
       // 列出來而不是整包攤開：`ResolvedScripts` 是內部型別，日後在它上面加欄位

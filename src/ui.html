@@ -697,11 +697,6 @@ function renderSettings() {
       </div>
 
       <div class="grp">
-        <div class="grphd"><span class="label">檢查項</span></div>
-        ${field(".loom/context.md", settings.checks.contextMd ? "找到，會填進 agent 的提示詞" : "找不到，agent 拿不到專案規範", settings.checks.contextMd ? "ro good" : "ro warn")}
-      </div>
-
-      <div class="grp">
         <div class="grphd"><span class="label">專案指令</span><span class="aside">package.json</span></div>
         ${scriptRows}
         ${field("安裝", settings.install ?? "沒有 lockfile，跳過安裝", "ro")}

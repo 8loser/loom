@@ -59,7 +59,7 @@ loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 
 
 **讀主 checkout 的版本，不是 worktree 的。** 跟 `spec_md` 一致。某條 spec branch 改了 `.loom/context.md` 不該立刻對別條 branch 正在跑的 coder 生效，那會讓同一批平行的 spec 拿到不同規範而且沒有訊號。
 
-沒有這個檔案時 `{context_md}` 是空字串，模板留一個空的 `<context>` 區塊，agent 照樣跑，reviewer 退回只用 smell baseline 判斷。設定頁的檢查項會顯示找不到。
+沒有這個檔案時 `{context_md}` 是空字串，模板留一個空的 `<context>` 區塊，agent 照樣跑，reviewer 退回只用 smell baseline 判斷。設定頁不回報它在不在：寫不寫是使用者的事，沒有它也不擋執行，多一個欄位只是多一個要維護的東西。
 
 **詞彙表路徑仍然寫在提示詞裡**，而提示詞可編輯 -- 路徑本身就是設定。另開欄位等於同一件事有兩個地方可以改，遲早不一致。
 
