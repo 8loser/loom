@@ -80,8 +80,9 @@ const WORKTREES_DIR = ".loom/worktrees";
 /**
  * 專案背景進 agent 的唯一管道（見 DESIGN.md「agent 繼承什麼環境」）。
  *
- * agent 跑在純推理引擎模式下，`CLAUDE.md` 不會被自動載入，提示詞也不叫
- * agent 自己去讀 `CONTEXT.md` 之類的檔案 -- 那等於讓環境決定它看到什麼。
+ * 專案的 `CLAUDE.md` 不會被載入（`--setting-sources user` 只吃使用者層），
+ * 提示詞也不叫 agent 自己去讀 `CONTEXT.md` 之類的檔案 -- 那等於讓專案的
+ * 環境決定它看到什麼。
  * 要讓 agent 知道的事寫在這裡，loom 讀進來填成模板變數。
  *
  * 內容放什麼由使用者決定，loom 不規定也不解析 -- 提示詞只說「這是這個專案

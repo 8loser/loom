@@ -209,27 +209,42 @@ function decideUnparseableOutcome(
 }
 
 // 隔離 flag 的基底集合，跟 chat.ts 的長駐雙向 process 共用 -- 兩邊都得
-// 隔離個人環境（DESIGN.md「隔離個人環境」），只有一份維護，不是兩份可能
-// 漂移的複本。
+// 用同一份設定來源（DESIGN.md「agent 繼承什麼環境」），只有一份維護，不是
+// 兩份可能漂移的複本。
 //
-// `--setting-sources ""` 是空清單：user / project / local 三層都不載入。
-// 立場是把 `claude -p` 當純推理引擎，進 agent 的東西只有 loom 自己組的
-// 提示詞（DESIGN.md「claude -p 當純推理引擎」）。實測（claude 2.1.220）
-// 這一顆 flag 同時決定四件事，沒有辦法分開：
+// `--setting-sources user` 只載入使用者層（`~/.claude/`），專案層不載入。
+// 分界是：專案那側 agent 看到什麼只由 loom 的提示詞決定（`.loom/context.md`
+// 是唯一管道），使用者層則是這台機器的擁有者對所有 agent 的偏好，刻意讓它
+// 進來。
 //
-//   | setting-sources | 全域 CLAUDE.md | 專案 CLAUDE.md | 專案 .claude/skills/ | 個人 hook |
-//   |-----------------|----------------|----------------|----------------------|-----------|
-//   | 預設（不帶）    | 載入           | 載入           | 可用                 | 觸發      |
-//   | project,local   | 不載入         | 載入           | 可用                 | 不觸發    |
-//   | local / ""      | 不載入         | 不載入         | 不可用               | 不觸發    |
+// 實測（claude 2.1.221，探針放在一個獨立的 HOME 底下，hook 是否觸發用它
+// 自己 touch 出來的標記檔判定，不靠 agent 自述）：
 //
-// 要補能力回來是 `--plugin-dir <path>`（可重複，session-only），它不受
-// setting-sources 影響，實測在空清單下照樣載得到 plugin 的 skill。現在沒有
-// 這個需求所以不帶，要加的時候是往 isolationArgs 疊一組路徑，不是把
-// setting-sources 放寬。
+//   | setting-sources | 全域 CLAUDE.md | 專案 CLAUDE.md |
+//   |-----------------|----------------|----------------|
+//   | 預設（不帶）    | 載入           | 載入           |
+//   | user            | 載入           | 不載入         |
+//   | project         | 載入           | 載入           |
+//   | project,local   | 載入           | 載入           |
+//   | ""              | 不載入         | 不載入         |
+//
+// 這顆 flag 是整層開關，不是 CLAUDE.md 的開關：`user` 之下 `~/.claude/` 的
+// hook、`permissions`、`env`、`skills/` 四項全部一起進來（`""` 之下四項全部
+// 沒有）。兩個會咬人的細節：
+//   - `permissions.deny` 在 `--permission-mode bypassPermissions` 之下照樣
+//     生效，bypass 只跳過詢問。個人 deny 清單擋掉的路徑 coder 一樣讀不到，
+//     而症狀只會表現成品質變差，不會標成權限問題。
+//   - 個人 hook 對每個 coder 生效。流水線行為因此掛在一個不在版控裡、也不
+//     在任何 run 記錄裡的檔案上，agent 反覆失敗時要往那裡查。
+//
+// 使用者層的固定開銷實測 +2565 token（同一組 flag、`--tools ""` 的空白呼叫，
+// 3297 -> 5862）。
+//
+// 舊註記（2.1.220）寫 `project,local` 不載入全域 CLAUDE.md，2.1.221 實測是
+// 載入的。要縮回「什麼都不載入」是把值改回 `""`，不是改成 `local`。
 export const BASE_ISOLATION_FLAGS = [
   "--setting-sources",
-  "",
+  "user",
   "--strict-mcp-config",
   "--disable-slash-commands",
   "--permission-mode",
@@ -314,10 +329,10 @@ function runClaudeBuffered(opts: ClaudeSpawnOptions): Promise<ClaudeRunResult> {
       let events: StreamEvent[];
       try {
         const parsed: unknown = JSON.parse(stdout);
-        // 實測發現 --output-format json 的形狀不是恆定的：不帶
-        // --setting-sources/--strict-mcp-config/--disable-slash-commands/
-        // --permission-mode 時印整個 session 的事件陣列；production 實際
-        // 用的參數組合下，印的是「最後那個 result 事件」本身，不包陣列。
+        // 實測發現 --output-format json 的形狀不是恆定的：印整個 session 的
+        // 事件陣列，或只印「最後那個 result 事件」本身、不包陣列。成因是
+        // 設定裡的 verbose -- 改用 --setting-sources user 之後，使用者層
+        // 的 "verbose": true 會被載入，同一組 flag 也會變成陣列形狀。
         // 兩種都處理，不假設哪一種才是「正常」的。
         events = Array.isArray(parsed) ? parsed : [parsed as StreamEvent];
       } catch {

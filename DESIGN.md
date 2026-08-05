@@ -51,7 +51,7 @@ loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 
 
 他的 skill 反覆引用 `CONTEXT.md` 與 `docs/adr/`。對省 token 來說這層比通用工程術語更有效 -- 通用術語是他的專業，`slot`、`occupancy`、`week strip` 在你這裡是什麼意思是你的專業。
 
-**專案背景進 agent 的唯一管道是 `.loom/context.md`。** loom 讀它，填成 `{context_md}` 模板變數，coder 與兩個 reviewer 的提示詞裡都有一個 `<context>` 區塊。專案自己的 `CLAUDE.md`、`CONTEXT.md`、`CODING_STANDARDS.md` 都不參與，提示詞也不叫 agent 自己去找那些檔案 -- 那等於讓環境決定 agent 看到什麼，跟純推理引擎的立場衝突（見「agent 繼承什麼環境」）。
+**專案背景進 agent 的唯一管道是 `.loom/context.md`。** loom 讀它，填成 `{context_md}` 模板變數，coder 與兩個 reviewer 的提示詞裡都有一個 `<context>` 區塊。專案自己的 `CLAUDE.md`、`CONTEXT.md`、`CODING_STANDARDS.md` 都不參與，提示詞也不叫 agent 自己去找那些檔案 -- 那等於讓專案的環境決定 agent 看到什麼，跟「專案層擋掉」的立場衝突（見「agent 繼承什麼環境」）。
 
 **內容放什麼由使用者決定，loom 不規定。** 提示詞只說「這是這個專案要你先知道的事」，整份原樣塞進 `<context>` 區塊，不解析、不分節、不假設裡面是詞彙表還是編碼規範。loom 唯一預設的判準是 issue reviewer 的 smell baseline，那份清單內建在提示詞裡，跟這個檔案無關；`<context>` 講到的事情跟 baseline 抵觸時以 `<context>` 為準。
 
@@ -183,7 +183,7 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 
 **worktree 放 repo 內。** 放 `~/.loom/worktrees/` 的話 worktree 會在 repo 被刪之後變成孤兒、路徑也跟專案脫節。Claude Code 自己的 `EnterWorktree` 用 `.claude/worktrees/`，是同一個取捨的旁證。
 
-這個決定曾經有一項代價：coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 `CLAUDE.md`，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md`，那是 main branch 的版本，會跟 worktree 自己 checkout 出來的那份疊加，而且沒有訊號能分辨哪份該贏。改成純推理引擎之後 `CLAUDE.md` 完全不載入，這項代價消失了。
+這個決定曾經有一項代價：coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 `CLAUDE.md`，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md`，那是 main branch 的版本，會跟 worktree 自己 checkout 出來的那份疊加，而且沒有訊號能分辨哪份該贏。改成只吃使用者層之後專案的 `CLAUDE.md` 不再載入，這項代價消失了。
 
 **目錄自我忽略，不改 repo 根的 `.gitignore`。** 建 worktree 前先寫 `.loom/worktrees/.gitignore`，內容一個 `*`。repo 根那份是使用者的檔案，loom 不去動它；被 `*` 蓋到的 `.gitignore` 自己照樣生效，git 讀忽略規則不看檔案自身的忽略狀態。忽略規則絕不能寫成 `.loom/` -- 那會把 `specs` 一起蓋掉，狀態 commit 就沒有路徑可以落地。失敗是響亮的（`commitStateChange` 用明確路徑 `git add .loom/specs`，底下有被 ignore 的新檔案時 git 會 exit 非 0 並列出來），所以不需要另外做啟動檢查；`add -A` 才是會靜默跳過的那種寫法，這也是不用它的理由之一。
 
@@ -512,13 +512,13 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 | 結構化回報 | `--json-schema`，state transition 不需要解析自然語言 |
 | 角色設定 | 模板本身（見下） |
 | 不被權限卡住 | `--permission-mode bypassPermissions`，限 worktree 內 |
-| 純推理引擎 | `--setting-sources ""`、`--strict-mcp-config`、`--disable-slash-commands` |
+| 只吃使用者層設定，擋掉專案層 | `--setting-sources user`、`--strict-mcp-config`、`--disable-slash-commands` |
 
 預設仍是 `--output-format json`（一次性拿完整結果）；`runClaude()` 另外加了一條 `--output-format stream-json` 逐行解析的路徑，只在呼叫端給了 `onEvent` 回呼時啟用（見「觀測」一節），沒給就完全走原本的路徑，兩者共用同一套 result 事件判讀邏輯。
 
 **角色設定沒有用 `--append-system-prompt`，整份模板走 stdin。** 提示詞改成可編輯之後，模板本身就包含角色說明與材料（`{spec_md}`、`{issue_md}` 那些變數），拆成「system prompt 那半可編輯、user prompt 那半程式組」會讓「一個角色一份模板」這件事變成兩個地方可以改。代價是那些指示落在 user turn 而不是 system prompt。
 
-**實測到一個非文件記載的行為，寫下來省得下次重踩：** `--output-format json` 的輸出形狀不是恆定的。不帶隔離 flag（`--setting-sources`/`--strict-mcp-config`/`--disable-slash-commands`/`--permission-mode`）時印整條 session 的事件陣列；production 實際用的 flag 組合下，只印最後那個 `result` 事件本身，不包陣列。`src/claude.ts` 兩種都處理（`Array.isArray` 判斷）。
+**實測到一個非文件記載的行為，寫下來省得下次重踩：** `--output-format json` 的輸出形狀不是恆定的，可能印整條 session 的事件陣列，也可能只印最後那個 `result` 事件本身、不包陣列。成因是設定裡的 `verbose` -- 改用 `--setting-sources user` 之後，使用者層的 `"verbose": true` 會被載入，同一組 flag 也會變成陣列形狀。`src/claude.ts` 兩種都處理（`Array.isArray` 判斷）。
 
 **`rate_limit_event` 的 `overageStatus` 不是用量用盡的判定依據。** 實測（2.1.220，stream-json）一次完全成功的呼叫會帶：
 
@@ -541,27 +541,30 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 
 ### agent 繼承什麼環境
 
-**`claude -p` 當純推理引擎。** 進 agent 的東西只有 loom 自己組的提示詞：角色模板加上填進去的 spec、issue、diff。機器上的任何設定都不參與，包含全域 `~/.claude/CLAUDE.md`、專案自己的 `CLAUDE.md`、plugin、skill、hook、MCP。
+**分界在使用者層與專案層之間，不在「有沒有設定」。** 使用者層（`~/.claude/`）進得來：那是這台機器的擁有者對所有 agent 的偏好，他知道自己寫了什麼、改得動、也預期它生效。專案層擋掉：agent 在那一側看到什麼只由 loom 的提示詞決定，`.loom/context.md` 是唯一管道。loom 用 `--setting-sources user`。
 
-實測結果（`claude -p` 2.1.220），`--setting-sources` 一顆 flag 同時決定四件事，沒有辦法分開：
+實測結果（`claude -p` 2.1.221，探針放在一個獨立的 `HOME` 底下，hook 是否觸發用它自己 `touch` 出來的標記檔判定，不靠 agent 自述）：
 
-| `--setting-sources` | 全域 `CLAUDE.md` | 專案 `CLAUDE.md` | 專案 `.claude/skills/` | 個人 hook |
-|---|---|---|---|---|
-| 預設（不帶） | 載入 | 載入 | 可用 | 觸發 |
-| `project,local` | 不載入 | 載入 | 可用 | 不觸發 |
-| `local` 或 `""` | 不載入 | 不載入 | 不可用 | 不觸發 |
+| `--setting-sources` | 全域 `CLAUDE.md` | 專案 `CLAUDE.md` |
+|---|---|---|
+| 預設（不帶） | 載入 | 載入 |
+| `user` | 載入 | 不載入 |
+| `project` | 載入 | 載入 |
+| `project,local` | 載入 | 載入 |
+| `""` | 不載入 | 不載入 |
 
-loom 用空清單（`--setting-sources ""`）。
+**這顆 flag 是整層開關，不是 `CLAUDE.md` 的開關。** `user` 之下 `~/.claude/` 的 hook、`permissions`、`env`、`skills/` 四項全部一起進來，沒有辦法只挑其中一項；`""` 之下四項全部沒有。實測驗到的兩個細節：
 
-**為什麼不是「專案規範免費進到每個 agent」。** 先前的版本走 `project,local`，理由是專案 `CLAUDE.md` 是現成的 per-repo 規範管道，loom 完全不用參與。放棄它換來的是一條說得完的規則：agent 看到什麼，只由 loom 的提示詞決定。中間狀態的成本在整合面：一旦環境的一部分會進去，就得回答「哪些 skill、哪些 MCP、哪些 plugin 要用」，而答案會是角色乘上專案的矩陣，那是設定頁裡長不完的東西。純推理引擎沒有這個問題，代價是專案規範得自己找路進來。
+- **`permissions.deny` 在 `--permission-mode bypassPermissions` 之下照樣生效**，bypass 只跳過詢問。個人 deny 清單擋掉的路徑 coder 一樣讀不到，而那個失敗不會標成權限問題，只會表現成品質變差。
+- **個人 hook 對每個 coder 生效。** 這是四項裡唯一會主動改變流程的：`PreToolUse` 回傳 deny 就擋掉工具呼叫。流水線行為因此掛在一個不在版控裡、也不在任何 run 記錄裡的檔案上，agent 反覆失敗時要往那裡查。
 
-**專案背景改走 `.loom/context.md`**（見「專案自己的詞彙表」）。loom 讀它填成模板變數，內容是 loom 給的，不是環境帶的，立場不變。
+這是收下 `user` 的代價，接受它換到的是「個人規範只寫一份」。要縮回什麼都不載入是把值改回 `""`（不是 `local` -- 2.1.220 的舊註記說 `project,local` 不載入全域 `CLAUDE.md`，2.1.221 實測是載入的）。
 
-**能力要補回來是 `--plugin-dir`，不是把 `--setting-sources` 放寬。** 它可重複、session-only、不受 `--setting-sources` 影響，實測在空清單下照樣載得到 plugin 的 skill。MCP 同理走 `--mcp-config` 配現有的 `--strict-mcp-config`，是純白名單。兩個都是「明確列舉」語意，跟純推理引擎的立場一致；現在都沒有需求，所以都不帶。
+**為什麼專案層仍然擋掉。** 更早的版本走 `project,local`，理由是專案 `CLAUDE.md` 是現成的 per-repo 規範管道，loom 完全不用參與。放棄它換來的是一條說得完的規則：agent 在專案那側看到什麼，只由 loom 的提示詞決定。一旦專案環境的一部分會進去，就得回答「哪些 skill、哪些 MCP、哪些 plugin 要用」，而答案會是角色乘上專案的矩陣，那是設定頁裡長不完的東西。專案背景改走 `.loom/context.md`（見「專案自己的詞彙表」），內容是 loom 讀進來填的，不是環境帶的。
 
-**`--bare` 和 `--safe-mode` 都不用。** `--bare` 關得掉 `CLAUDE.md` 自動探索，但強制走 `ANTHROPIC_API_KEY`，跟訂閱制決定衝突；`--safe-mode` 不強迫換 API key，但把 skill、plugin 一起關死，之後想用 `--plugin-dir` 明確給能力就沒得談。`--setting-sources ""` 關掉的範圍剛好，而且留著加回來的路。
+**專案側的能力要補回來是 `--plugin-dir`，不是把 `--setting-sources` 放寬。** 它可重複、session-only、不受 `--setting-sources` 影響，實測在空清單下照樣載得到 plugin 的 skill。MCP 同理走 `--mcp-config` 配現有的 `--strict-mcp-config`，是純白名單。兩個都是「明確列舉」語意；現在都沒有需求，所以都不帶。
 
-隔離 hook 這件事本身也仍然重要：個人的 SessionStart hook 會對每個 coder 生效，而人不會意識到那跟 loom 有關 -- 調整個人設定就默默改變了流水線行為。
+**`--bare` 和 `--safe-mode` 都不用。** `--bare` 關得掉 `CLAUDE.md` 自動探索，但強制走 `ANTHROPIC_API_KEY`，跟訂閱制決定衝突；`--safe-mode` 不強迫換 API key，但把 skill、plugin 一起關死，之後想用 `--plugin-dir` 明確給能力就沒得談。`--setting-sources` 關掉的範圍剛好，而且留著加回來的路。
 
 ### 驗證方式
 
@@ -731,7 +734,9 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 - **token 總量與金額是兩條曲線。** 四類 token 單價不同（output 最貴、cache read 最便宜），一個 spec 可能 token 多但便宜（大量快取命中），也可能 token 少但貴。要比較就分開記。
 - **訂閱制下金額不是帳單。** 那是「如果走 API 會花多少」的等價換算，用途是相對比較（這個 spec 比那個貴三倍、這次重試燒掉半個 spec 的量），不是預測還能跑多久 -- 5 小時與每週視窗官方沒公布 token 換算。
 
-那 9985 是一次「只回一個 ok」的空白呼叫的固定開銷，量測時還是 `--setting-sources project,local`，裡面含全域 `CLAUDE.md` 與 plugin skill 清單。改成純推理引擎之後同樣一次空白呼叫是 3668（`claude -p` 2.1.220，同一組 flag，只差 `--setting-sources`），剩下的是 system prompt 加工具定義。對照組：完全不帶 `--setting-sources` 是 13562。
+那 9985 是一次「只回一個 ok」的空白呼叫的固定開銷，量測時還是 `--setting-sources project,local`，裡面含全域 `CLAUDE.md` 與 plugin skill 清單。改成空清單之後同樣一次空白呼叫是 3668（`claude -p` 2.1.220，同一組 flag，只差 `--setting-sources`），剩下的是 system prompt 加工具定義。對照組：完全不帶 `--setting-sources` 是 13562。
+
+改成 `--setting-sources user` 之後重量一次（2.1.221、`--tools ""`、同一組 flag）：`""` 是 3297，`user` 是 5862。使用者層的固定開銷是每次呼叫 +2565 token，主要來自全域 `CLAUDE.md` 與 `~/.claude/skills/` 的清單。
 
 ## 明確不做
 

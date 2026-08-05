@@ -97,7 +97,7 @@ test("templateVarsFor: coder gets the worktree's actual package.json scripts, no
 });
 
 test("templateVarsFor: context_md comes from the repo's .loom/context.md, not the worktree's", () => {
-  // agent 跑在純推理引擎模式下，這個檔案是專案規範進得了 prompt 的唯一管道，
+  // 專案的 CLAUDE.md 不會被載入，這個檔案是專案規範進得了 prompt 的唯一管道，
   // 而且刻意讀主 checkout 的版本：某條 spec branch 改了規範不該立刻對別條
   // branch 的 coder 生效。兩邊都放檔案，斷言拿到的是 repo 那份。
   const repoPath = mkdtempSync(join(tmpdir(), "loom-ctx-repo-"));
