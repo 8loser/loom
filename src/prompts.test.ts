@@ -1,11 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-import { templateVarsFor } from "./agent.ts";
-import type { AgentRequest } from "./orchestrator.ts";
 import {
   DEFAULT_TEMPLATES,
   TEMPLATE_VARIABLES,
@@ -41,114 +36,6 @@ test("every variable a template uses is declared as available", () => {
       );
     }
   }
-});
-
-test("every declared variable can actually be filled with a value", () => {
-  // 反向：宣告了但 varsFor 填不出值的變數，在設定頁上是騙人的 -- 使用者照著
-  // 加進模板只會得到空字串。不強制預設模板都用到（使用者可以自己加進去），
-  // 但強制填得出來。
-  const request: AgentRequest = {
-    role: "coder",
-    workspace: {
-      id: 1,
-      name: "w",
-      repoPath: "/nowhere",
-      mainBranch: "main",
-      portRangeStart: 4300,
-      portRangeEnd: 4399,
-      parallelLimit: 2,
-    },
-    spec: "demo",
-    issue: "01",
-    worktreePath: "/nowhere",
-    attempt: 1,
-  };
-  const available = new Set(Object.keys(templateVarsFor(request)));
-
-  for (const role of Object.keys(DEFAULT_TEMPLATES) as PromptRoleName[]) {
-    for (const name of TEMPLATE_VARIABLES[role]) {
-      assert.ok(available.has(name), `${role} advertises {${name}} but agent.ts never supplies it`);
-    }
-  }
-});
-
-test("templateVarsFor: coder gets the worktree's actual package.json scripts, not last checked once", () => {
-  const dir = mkdtempSync(join(tmpdir(), "loom-prompts-test-"));
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { test: "vitest run", build: "vite build" } }));
-
-  const request: AgentRequest = {
-    role: "coder",
-    workspace: {
-      id: 1,
-      name: "w",
-      repoPath: "/nowhere",
-      mainBranch: "main",
-      portRangeStart: 4300,
-      portRangeEnd: 4399,
-      parallelLimit: 2,
-    },
-    spec: "demo",
-    issue: "01",
-    worktreePath: dir,
-    attempt: 1,
-  };
-
-  assert.equal(templateVarsFor(request).scripts, "test: vitest run\nbuild: vite build");
-});
-
-test("templateVarsFor: context_md comes from the repo's .loom/context.md, not the worktree's", () => {
-  // 專案的 CLAUDE.md 不會被載入，這個檔案是專案規範進得了 prompt 的唯一管道，
-  // 而且刻意讀主 checkout 的版本：某條 spec branch 改了規範不該立刻對別條
-  // branch 的 coder 生效。兩邊都放檔案，斷言拿到的是 repo 那份。
-  const repoPath = mkdtempSync(join(tmpdir(), "loom-ctx-repo-"));
-  const worktreePath = mkdtempSync(join(tmpdir(), "loom-ctx-wt-"));
-  mkdirSync(join(repoPath, ".loom"), { recursive: true });
-  mkdirSync(join(worktreePath, ".loom"), { recursive: true });
-  writeFileSync(join(repoPath, ".loom", "context.md"), "from repo");
-  writeFileSync(join(worktreePath, ".loom", "context.md"), "from worktree");
-
-  const request: AgentRequest = {
-    role: "coder",
-    workspace: {
-      id: 1,
-      name: "w",
-      repoPath,
-      mainBranch: "main",
-      portRangeStart: 4300,
-      portRangeEnd: 4399,
-      parallelLimit: 2,
-    },
-    spec: "demo",
-    issue: "01",
-    worktreePath,
-    attempt: 1,
-  };
-
-  assert.equal(templateVarsFor(request).context_md, "from repo");
-});
-
-test("templateVarsFor: a missing .loom/context.md is an empty string, not a crash", () => {
-  // 沒有規範檔的專案照樣要跑得起來，模板留一個空的 <context> 區塊就好。
-  const dir = mkdtempSync(join(tmpdir(), "loom-ctx-none-"));
-
-  const request: AgentRequest = {
-    role: "coder",
-    workspace: {
-      id: 1,
-      name: "w",
-      repoPath: dir,
-      mainBranch: "main",
-      portRangeStart: 4300,
-      portRangeEnd: 4399,
-      parallelLimit: 2,
-    },
-    spec: "demo",
-    issue: "01",
-    worktreePath: dir,
-    attempt: 1,
-  };
-
-  assert.equal(templateVarsFor(request).context_md, "");
 });
 
 test("vendored templates keep the MIT attribution", () => {

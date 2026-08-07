@@ -1,7 +1,17 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import type { RunUsage } from "./db.ts";
+
+// 一次 claude 呼叫的用量與成本紀錄。原本放在 db.ts，清架構時跟 claude 整合
+// 收在一起（純型別，零執行期影響）。
+export interface RunUsage {
+  durationMs: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
 
 // 形狀是實測出來的（claude 2.1.220，`--output-format json --json-schema ...`），
 // 不是查文件猜的。--output-format json 會把整條 session 的所有事件包成一個
