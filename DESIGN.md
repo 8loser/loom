@@ -11,7 +11,7 @@
 ## 核心概念
 
 | 概念 | 定義 |
-|---|---|
+| --- | --- |
 | workspace | 一個 git repo 加上它的執行設定 |
 | spec | `<repo>/.loom/specs/` 底下的一個資料夾，含 `spec.md` 與 `issues/NN-*.md` |
 | issue | 唯一的工作單元，狀態機作用在這一層 |
@@ -27,7 +27,7 @@ loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 
 **價值在詞彙。** 他的 skill 裡是壓縮過的工程術語：`tracer bullet`、`vertical slice`、`blast radius`、`expand–contract`、`seam`、`deep module`、`frontier`。每個都是一段話的縮寫而 agent 認得。這決定了 loom 自己那層外框要多薄 -- **外框只負責遞交材料，不重講一遍怎麼做事**。把 `tracer bullet` 展開成「請把工作切成能獨立驗證的小塊」等於把壓縮效果丟掉，還跟內嵌的說法打架。
 
 | loom 的提示詞 | 內嵌來源 |
-|---|---|
+| --- | --- |
 | chat | `to-spec` 的 spec 模板（含 Testing Decisions）+ `to-tickets` 的 vertical slice 規則、expand–contract、`Blocked by` |
 | coder | `implement` + `tdd`（攤平） |
 | issue reviewer | `code-review` |
@@ -121,7 +121,7 @@ git 操作失敗 ──▶ spec 層 blocked（寫 blocked_reason）──人處�
 聚合表**由上而下 first-match**，第一列命中就停：
 
 | 順序 | 顯示狀態 | 判斷方式 |
-|---|---|---|
+| --- | --- | --- |
 | 1 | merged | front matter 的 `merged` |
 | 2 | spec blocked | front matter 的 `blocked_reason` 非空 |
 | 3 | blocked | 任一 issue 是 `blocked` |
@@ -154,7 +154,7 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 不做拖拉。人能觸發的轉移有六條，每一條對應一顆按鈕，兩邊互為檢查：
 
 | 按鈕 | 對應的邊 |
-|---|---|
+| --- | --- |
 | 草稿 spec 放行開跑 | `draft ──▶ ready`（該 spec 全部 issue） |
 | blocked 恢復 | `blocked ──▶ ready` |
 | blocked 先收目前進度 | `blocked ──▶ dropped`（含所有下游未開工 issue） |
@@ -170,7 +170,7 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 ## git 拓撲
 
 | 項目 | 決定 |
-|---|---|
+| --- | --- |
 | 分支 | 一個 spec 一條 `spec/<name>`，一個 worktree |
 | worktree 位置 | `<repo>/.loom/worktrees/<spec>`，目錄自帶 `.gitignore`（內容 `*`）不讓它弄髒主 checkout |
 | issue 執行順序 | 同 spec 依編號序列，跨 spec 平行；有 issue 卡住時用 `Blocked by` 判斷哪些後續仍可做 |
@@ -302,7 +302,7 @@ spec.md 與 issue 檔合成一個 hash，不分兩欄：人的處置不分兩種
 ## 失敗與重試
 
 | 類別 | 事件 | 處理 |
-|---|---|---|
+| --- | --- | --- |
 | domain | review reject、test fail、build fail | 退回 implementing，吃 domain 額度 |
 | domain | diff 為空 | 送 reviewer 判定，不計 |
 | infra | subprocess 非零退出、API error、輸出不符 schema | 原地重跑，獨立計數加 backoff |
@@ -347,7 +347,7 @@ orchestrator 重啟後做兩件事，順序不能顛倒。
 **二、依中間狀態分兩種處理，不是一律回捲：**
 
 | 卡住的狀態 | 處理 |
-|---|---|
+| --- | --- |
 | implementing | 三段式清理退回 base_sha，回 `ready`，不計重試 |
 | review_ready、reviewing | 退回 `review_ready` 重派一次 reviewer，**不動 code** |
 | test_ready、testing | 退回 `test_ready` 重跑一次測試，**不動 code** |
@@ -371,7 +371,7 @@ orchestrator 持有狀態並依狀態 spawn 對應的 subprocess。不是 coder 
 ### 四個 LLM 角色
 
 | 角色 | 輸入 | `--json-schema` 輸出 |
-|---|---|---|
+| --- | --- | --- |
 | chat | 對話，cwd 在 main checkout，`--disallowedTools Write Edit` | `{spec_md, issues:[{title, body, blocked_by[], e2e, needs_human}]}` |
 | coder | spec.md + issue.md + 前次失敗紀錄 | `{done, summary, files_changed[]}` |
 | issue reviewer | spec.md + issue.md + `git diff <base_sha>..HEAD` | `{verdict, comments[]}` |
@@ -410,7 +410,7 @@ reviewer 同時負責判定測試品質：這些測試是在測行為還是在�
 不是同一件事的不同時機，是結構上看得見的範圍不同。
 
 | 角色 | 讀的 diff | 唯一能抓到的 |
-|---|---|---|
+| --- | --- | --- |
 | issue reviewer | `git diff <base_sha>..HEAD` | 細節：這個改動有沒有做對自己的事、測試有沒有測到行為 |
 | spec reviewer | `git diff main...spec/<name>` | 跨 issue 的一致性：重複的抽象、殘留的死碼、七個各自合理但疊起來歪掉的架構 |
 
@@ -495,7 +495,7 @@ schema 裡的 `needs_human` 是分類旗標不是狀態欄位，跟 `e2e` 同一
 orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化，且它是唯一的狀態寫入者。
 
 | 項目 | 選擇 |
-|---|---|
+| --- | --- |
 | server | Hono 或 Express，送 SSE |
 | 前端 | React + Vite，build 成靜態檔由同一個 server 提供 |
 | 資料 | `node:sqlite`（零依賴，會噴 ExperimentalWarning） |
@@ -505,7 +505,7 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 ### 用到的 claude CLI 能力
 
 | 需求 | flag |
-|---|---|
+| --- | --- |
 | headless 執行 | `-p` |
 | 即時串流輸出 | `--output-format stream-json` |
 | chat 雙向串流 | `--input-format stream-json` |
@@ -539,6 +539,30 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 
 呼叫本身 `is_error: false`、`subtype: success`，跟 `"allowed"` 沒有兩樣，只是多一個「快到門檻了」的提醒 -- 原本只認字面 `"allowed"` 的判定會把它當成用量用盡，整條 chat 對話第一輪就被判死。跟 `overageStatus:"rejected"` 是同一種錯：把「還在可用範圍內的附加資訊」當成「不可用」。`src/claude.ts` 現在認 `["allowed", "allowed_warning"]` 兩個值，其餘一律走用量用盡判定。
 
+**`--json-schema` 強迫的 `StructuredOutput` 回報工具，讓 result 事件同時帶兩個欄位**：`result`（結構化結果的 JSON 字串）與 `structured_output`（同一份內容已 parse 好的物件）。用後者，不要自己再 `JSON.parse(result)` 一次 -- CLI 已經 parse 過。**schema 要求了但 `structured_output` 不在，判 infra_fail，不當 ok**：那一輪沒有產出契約要求的結構化結果，當 ok 會讓狀態轉移讀到 undefined。
+
+### 一次呼叫的結果怎麼判
+
+兩條 spawn 路徑（一次性 `--output-format json` / 逐行 `stream-json`）收完 stdout 都交給同一個 `decideOutcome`，用量用盡／出錯／schema 缺漏三條規則只寫一份，不是各自重寫。判讀順序，第一個命中就停：
+
+| 順序 | 條件 | 結果 |
+| --- | --- | --- |
+| 1 | 沒有 result 事件 | 交還呼叫端走字串比對保底（見下） |
+| 2 | 任一 `rate_limit_event` 的 `status` 不在 `{allowed, allowed_warning}` | usage_exhausted |
+| 3 | `result.is_error`，且 `subtype`+`api_error_status` 命中用量用盡詞 | usage_exhausted |
+| 4 | `result.is_error`，沒命中 | infra_fail |
+| 5 | 有要求 schema 但 `structured_output` 缺漏 | infra_fail |
+| 6 | 否則 | ok |
+
+**判不出來一律 infra_fail，不判 usage_exhausted。** infra_fail 只是多重試三次，usage_exhausted 會讓整個 orchestrator 停住等人；誤判成本不對稱，落在保守那一邊。真的撞到上限時 `status` 會是什麼值還沒有樣本。
+
+字串比對保底有兩種，差別在能不能比對 stdout：
+
+- **一次性 JSON 路徑比對 stdout。** 走到這裡代表 stdout 是一坨 parse 不了的東西，本身就是錯誤訊息。
+- **stream-json 路徑只比對 stderr，絕不比對 stdout。** 它的 stdout 是一堆合法的 JSON 事件行，而 `rate_limit_event` 每次呼叫都會出現 -- 比對清單只要有任一詞撞上那個事件的內容，就會把每次失敗都判成用量用盡。
+
+**比對清單刻意不放 `out_of_credits`。** 它是 `rate_limit_event` 的 `overageDisabledReason` 值，而那個事件在每一次成功的 stream-json 呼叫裡都會出現（見上面 `overageStatus:"rejected"` 那段）。放進清單的話，任何沒印出 result 事件就結束的 stream，都會因為 stdout 裡有這個字串而被判成用量用盡。清單目前是 `usage limit` / `rate limit` / `5-hour limit` / `weekly limit`，沒有真的撞到上限驗證過，是保守起點，遇到真實案例要回來補。
+
 ### agent 繼承什麼環境
 
 **分界在使用者層與專案層之間，不在「有沒有設定」。** 使用者層（`~/.claude/`）進得來：那是這台機器的擁有者對所有 agent 的偏好，他知道自己寫了什麼、改得動、也預期它生效。專案層擋掉：agent 在那一側看到什麼只由 loom 的提示詞決定，`.loom/context.md` 是唯一管道。loom 用 `--setting-sources user`。
@@ -546,7 +570,7 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 實測結果（`claude -p` 2.1.221，探針放在一個獨立的 `HOME` 底下，hook 是否觸發用它自己 `touch` 出來的標記檔判定，不靠 agent 自述）：
 
 | `--setting-sources` | 全域 `CLAUDE.md` | 專案 `CLAUDE.md` |
-|---|---|---|
+| --- | --- | --- |
 | 預設（不帶） | 載入 | 載入 |
 | `user` | 載入 | 不載入 |
 | `project` | 載入 | 載入 |
@@ -697,7 +721,7 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 
 **完整輸出不落地。** 一個 issue 的 stream-json 可能幾 MB，乘上 issue 數與重試次數會把 DB 撐爆。只存摘要（耗時、成本、files_changed、verdict），失敗時才存完整 stdout，那時才需要它。
 
-**實作現況：** `claude.ts` 的 `runClaude` 有給 `onEvent` 才切換成 `--output-format stream-json --verbose` 逐行解析，沒給就維持既有的 `--output-format json` 一次性路徑，行為不變。事件粒度是「一個 assistant 內容區塊」，不追蹤 token-level 的 partial delta、不等 tool_result 回來（那些只換得到 tool_use_id 對應的額外狀態，換不到「看得懂 agent 在幹嘛」這個目標）。orchestrator 用一個純記憶體的 `LiveOutputStore`（key 是 run id）暫存，run 一結束就 `clear()`，完全不落地，跟上面「完整輸出不落地」一致。
+**實作現況：** `claude.ts` 的 `runClaude` 有給 `onEvent` 才切換成 `--output-format stream-json --verbose` 逐行解析，沒給就維持既有的 `--output-format json` 一次性路徑，行為不變。事件粒度是「一個 assistant 內容區塊」，不追蹤 token-level 的 partial delta（不帶 `--include-partial-messages`）、不等 tool_result 回來（那些只換得到 tool_use_id 對應的額外狀態，換不到「看得懂 agent 在幹嘛」這個目標）。orchestrator 用一個純記憶體的 `LiveOutputStore`（key 是 run id）暫存，run 一結束就 `clear()`，完全不落地，跟上面「完整輸出不落地」一致。
 
 接上的有 coder、issue_reviewer、以及測試階段的指令（`testrunner.ts` 透過同一條管線報 `kind:"port"` 與跑了哪個 script）。spec_reviewer 與 spec 層的 e2e 沒接：它們的 issue 是 null，看板目前沒有它們的顯示位置。
 
@@ -741,7 +765,7 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 ## 明確不做
 
 | 不做 | 加回來的條件 |
-|---|---|
+| --- | --- |
 | kanban 拖拉 | 人可觸發的轉移多到按鈕列排不下 |
 | 認證與授權 | 要在 localhost 以外的地方跑 |
 | tester agent | 決定改由獨立角色寫測試 |
