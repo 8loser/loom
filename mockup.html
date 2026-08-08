@@ -467,6 +467,16 @@
   .lane .spacer {
     margin-left: auto;
   }
+  .lane .wait {
+    font-family:
+      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .lane .wait b {
+    color: var(--accent);
+    font-weight: 600;
+  }
 
   .prog {
     display: flex;
@@ -1265,7 +1275,7 @@
         <div class="bscroller">
           <div class="grid">
             <div class="bempty" hidden>
-              沒有勾選任何專案，勾選上方的專案來顯示對應的 spec。
+              沒有勾選任何專案，勾選上方的專案來顯示對應的 issue。
             </div>
             <div class="colhead"><span class="label">待處理</span></div>
             <div class="colhead"><span class="label">實作中</span></div>
@@ -1280,7 +1290,7 @@
               data-state="running"
               data-spec="mobile-slot-settings"
               data-project="clinic-web"
-              data-branch="spec/mobile-slot-settings"
+              data-branch="issue/mobile-slot-settings"
               data-cost="$1.34"
               data-tok="輸入 1.8M · 輸出 61k"
               data-behind="0 個 code commit"
@@ -1290,7 +1300,7 @@
             >
               <span class="proj">clinic-web</span>
               <span class="name">mobile-slot-settings</span>
-              <span class="branch">spec/mobile-slot-settings</span>
+              <span class="branch">issue/mobile-slot-settings</span>
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"><i style="width: 43%"></i></span>
@@ -1344,7 +1354,7 @@
               data-state="running"
               data-spec="mobile-appointment-week-strip"
               data-project="clinic-web"
-              data-branch="spec/mobile-appointment-week-strip"
+              data-branch="issue/mobile-appointment-week-strip"
               data-cost="$0.72"
               data-tok="輸入 940k · 輸出 33k"
               data-behind="0 個 code commit"
@@ -1354,7 +1364,7 @@
             >
               <span class="proj">clinic-web</span>
               <span class="name">mobile-appointment-week-strip</span>
-              <span class="branch">spec/mobile-appointment-week-strip</span>
+              <span class="branch">issue/mobile-appointment-week-strip</span>
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"><i style="width: 29%"></i></span>
@@ -1409,7 +1419,7 @@
               data-state="blocked"
               data-spec="onboarding-defaults"
               data-project="booking-widget"
-              data-branch="spec/onboarding-defaults"
+              data-branch="issue/onboarding-defaults"
               data-cost="$1.96"
               data-tok="輸入 2.4M · 輸出 88k"
               data-behind="2 個 code commit"
@@ -1419,7 +1429,7 @@
             >
               <span class="proj">booking-widget</span>
               <span class="name">onboarding-defaults</span>
-              <span class="branch">spec/onboarding-defaults</span>
+              <span class="branch">issue/onboarding-defaults</span>
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"
@@ -1464,7 +1474,7 @@
               data-state="mergeable"
               data-spec="appointment-detail-sheet"
               data-project="clinic-admin"
-              data-branch="spec/appointment-detail-sheet"
+              data-branch="issue/appointment-detail-sheet"
               data-cost="$2.14"
               data-tok="輸入 2.9M · 輸出 96k"
               data-behind="0 個 code commit"
@@ -1473,7 +1483,7 @@
             >
               <span class="proj">clinic-admin</span>
               <span class="name">appointment-detail-sheet</span>
-              <span class="branch">spec/appointment-detail-sheet</span>
+              <span class="branch">issue/appointment-detail-sheet</span>
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"
@@ -1507,24 +1517,49 @@
               </div>
             </div>
 
-            <button class="fold" type="button">
-              <span class="tw" aria-hidden="true">▶</span>
-              <span class="ttl">草稿 3</span>
-              <span class="names"
-                >patient-search-filters · export-schedule-csv ·
-                notification-digest</span
-              >
-            </button>
+          <!-- lane 5：跨 parent 依賴示範，等另一個 parent 合併才開跑 -->
+          <button
+            class="lane"
+            type="button"
+            data-state="queued"
+            data-spec="slot-recurrence-rules"
+            data-project="clinic-web"
+            data-branch="issue/slot-recurrence-rules"
+            data-dep="mobile-slot-settings"
+            data-cost="—"
+            data-tok="—"
+            data-behind="等依賴合併"
+            data-progress="0 / 3 issue"
+            data-elapsed="尚未開始"
+            data-extra="這個 parent issue 等 mobile-slot-settings 合併進 main 才開跑；開跑時從 main 分支，自然吃得到它的產出。"
+          >
+            <span class="proj">clinic-web</span>
+            <span class="name">slot-recurrence-rules</span>
+            <span class="branch">issue/slot-recurrence-rules</span>
+            <span class="spacer"></span>
+            <span class="wait">等 <b>mobile-slot-settings</b> 合併</span>
+          </button>
 
-            <button class="fold" type="button">
-              <span class="tw" aria-hidden="true">▶</span>
-              <span class="ttl">已合併 12</span>
-              <span class="names"
-                >slot-conflict-warning · staff-colour-legend ·
-                week-strip-keyboard-nav · appointment-status-chips ·
-                timezone-display · 還有 7 個</span
-              >
-            </button>
+          <div class="cell">
+            <div class="card" tabindex="0" role="button">
+              <span class="id"><b>01</b> recurrence-rrule-parser</span>
+            </div>
+            <div class="card" tabindex="0" role="button">
+              <span class="id"><b>02</b> slot-recurrence-ui</span>
+            </div>
+            <div class="card" tabindex="0" role="button">
+              <span class="id"><b>03</b> recurrence-e2e</span>
+              <span class="foot"><span class="e2e">E2E</span></span>
+            </div>
+          </div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+          <div class="cell"></div>
+
+            <button class="fold" type="button" data-fold-kind="draft"></button>
+
+            <button class="fold" type="button" data-fold-kind="merged"></button>
           </div>
         </div>
       </div>
@@ -1534,7 +1569,7 @@
           <div class="dhead">
             <span class="label" id="sp-state">可以合併</span>
             <h2 id="sp-name">appointment-detail-sheet</h2>
-            <div class="sub" id="sp-branch">spec/appointment-detail-sheet</div>
+            <div class="sub" id="sp-branch">issue/appointment-detail-sheet</div>
           </div>
 
           <dl class="facts">
@@ -1632,12 +1667,13 @@
             <div class="line say">
               <span class="t">14:21:31</span><span class="k">說</span
               ><span class="m"
-                >先讀 CONTEXT.md 確認 slot 與 occupancy 在這個專案的定義。</span
+                >先讀 .loom/context.md 確認 slot 與 occupancy
+                在這個專案的定義。</span
               >
             </div>
             <div class="line tool">
               <span class="t">14:21:33</span><span class="k">讀取</span
-              ><span class="m">CONTEXT.md</span>
+              ><span class="m">.loom/context.md</span>
             </div>
             <div class="line tool">
               <span class="t">14:21:36</span><span class="k">讀取</span
@@ -1652,7 +1688,9 @@
             </div>
             <div class="line tool">
               <span class="t">14:21:47</span><span class="k">讀取</span
-              ><span class="m">specs/mobile-slot-settings/spec.md</span>
+              ><span class="m"
+                >.loom/issues/mobile-slot-settings/parent.md</span
+              >
             </div>
             <div class="line say">
               <span class="t">14:21:55</span><span class="k">說</span
@@ -1856,7 +1894,7 @@
         <div class="go">
           <p class="note">
             寫進
-            <span class="mono">specs/week-strip-ipad-portrait/</span>
+            <span class="mono">.loom/issues/week-strip-ipad-portrait/</span>
             並立刻開始跑 01。已經開始的 issue 之後就不能再改。
           </p>
           <button class="btn primary" type="button">建立並開始執行</button>
@@ -1913,26 +1951,7 @@
           ><span class="in">~/workspaces/clinic-web</span>
         </div>
         <div class="field">
-          <span class="label">spec 資料夾</span><span class="in">specs/</span>
-        </div>
-        <div class="field">
           <span class="label">主分支</span><span class="in">main</span>
-        </div>
-
-        <div class="grp">
-          <div class="grphd"><span class="label">檢查項</span></div>
-          <div class="field">
-            <span class="label">CLAUDE.md</span
-            ><span class="in ro" style="color: var(--ok)"
-              >找到，agent 會自動載入</span
-            >
-          </div>
-          <div class="field">
-            <span class="label">CONTEXT.md</span
-            ><span class="in ro" style="color: var(--warn)"
-              >找不到，建議先跑 /domain-modeling</span
-            >
-          </div>
         </div>
 
         <div class="grp">
@@ -1972,7 +1991,8 @@
         <div class="grp">
           <div class="grphd"><span class="label">限制</span></div>
           <div class="field">
-            <span class="label">同時執行的 spec</span><span class="in">2</span>
+            <span class="label">同時執行的 parent issue</span
+            ><span class="in">2</span>
           </div>
           <div class="field">
             <span class="label">連線埠範圍</span
@@ -1994,7 +2014,7 @@
               coder
             </button>
             <button class="prole" type="button">issue reviewer</button>
-            <button class="prole" type="button">spec reviewer</button>
+            <button class="prole" type="button">parent issue reviewer</button>
             <button class="prole" type="button">chat</button>
           </div>
 
@@ -2005,7 +2025,7 @@ public interfaces, not implementation details.
 
 A <b>seam</b> is the public boundary you test at. Tests live at
 seams, never against internals. The seams for this work are
-already agreed in the spec's Testing Decisions below — work
+already agreed in the parent issue's Testing Decisions below — work
 at those, do not introduce new ones.
 
 Work in <b>vertical slices</b>: one test → one implementation →
@@ -2014,14 +2034,14 @@ repeat, each test a <b>tracer bullet</b>.
 ... 省略 40 行 ...
 
 交棒前自己跑一次 typecheck 與 unit test。
-不要修改 specs 資料夾裡的任何檔案。
+不要修改 .loom 底下的任何檔案。
 
-&lt;spec&gt;{spec_md}&lt;/spec&gt;
-&lt;issue&gt;{issue_md}&lt;/issue&gt;
+&lt;parent_issue&gt;{parent_md}&lt;/parent_issue&gt;
+&lt;child_issue&gt;{child_md}&lt;/child_issue&gt;
 &lt;上一輪失敗&gt;{last_failure}&lt;/上一輪失敗&gt;</pre>
 
           <p class="pvars">
-            可用變數 {spec_md} {issue_md} {last_failure} {base_sha} {attempt}
+            可用變數 {parent_md} {child_md} {last_failure} {base_sha} {attempt}
             {port}
           </p>
 
@@ -2090,7 +2110,8 @@ repeat, each test a <b>tracer bullet</b>.
     const state = lane.dataset.state;
     const mergeable = state === "mergeable";
 
-    set("sp-state", STATE_LABEL[state] || state);
+    const dep = lane.dataset.dep;
+    set("sp-state", dep ? "等 " + dep + " 合併" : (STATE_LABEL[state] || state));
     set("sp-name", lane.dataset.spec);
     set("sp-branch", lane.dataset.branch);
     set("sp-prog", lane.dataset.progress);
@@ -2106,7 +2127,9 @@ repeat, each test a <b>tracer bullet</b>.
     } else {
       setBody([
         noteRun(lane.dataset.extra),
-        noteRun("spec review 與整體 e2e 要等全部 issue 到達終端後才跑。"),
+        noteRun(
+          "parent issue review 與整體 e2e 要等全部 child issue 到達終端後才跑。",
+        ),
       ]);
     }
     foot.hidden = !mergeable;
@@ -2168,6 +2191,64 @@ repeat, each test a <b>tracer bullet</b>.
     return out;
   }
 
+  // 草稿／已合併 fold 也是 per-workspace 的 parent issue，跟著篩選重算計數與名稱。
+  const FOLD_ITEMS = {
+    draft: [
+      { name: "patient-search-filters", project: "clinic-web" },
+      { name: "export-schedule-csv", project: "clinic-web" },
+      { name: "notification-digest", project: "booking-widget" },
+    ],
+    merged: [
+      { name: "slot-conflict-warning", project: "clinic-web" },
+      { name: "staff-colour-legend", project: "clinic-web" },
+      { name: "week-strip-keyboard-nav", project: "clinic-web" },
+      { name: "appointment-status-chips", project: "booking-widget" },
+      { name: "timezone-display", project: "clinic-admin" },
+      { name: "patient-card-redesign", project: "clinic-web" },
+      { name: "booking-confirmation-flow", project: "booking-widget" },
+      { name: "admin-role-permissions", project: "clinic-admin" },
+      { name: "inventory-reorder-alerts", project: "clinic-web" },
+      { name: "invoice-pdf-export", project: "booking-widget" },
+      { name: "staff-shift-templates", project: "clinic-admin" },
+      { name: "calendar-ics-export", project: "clinic-web" },
+    ],
+  };
+
+  function renderFolds(active) {
+    document.querySelectorAll(".fold").forEach(function (fold) {
+      const kind = fold.dataset.foldKind;
+      const items = (FOLD_ITEMS[kind] || []).filter(function (it) {
+        return active.has(it.project);
+      });
+      if (items.length === 0) {
+        fold.hidden = true;
+        return;
+      }
+      fold.hidden = false;
+      while (fold.firstChild) fold.removeChild(fold.firstChild);
+      const shown = items.slice(0, 5);
+      const rest = items.length - shown.length;
+      const tw = document.createElement("span");
+      tw.className = "tw";
+      tw.setAttribute("aria-hidden", "true");
+      tw.textContent = "▶";
+      const ttl = document.createElement("span");
+      ttl.className = "ttl";
+      ttl.textContent = (kind === "draft" ? "草稿 " : "已合併 ") + items.length;
+      const names = document.createElement("span");
+      names.className = "names";
+      names.textContent =
+        shown
+          .map(function (it) {
+            return it.name;
+          })
+          .join(" · ") + (rest > 0 ? " · 還有 " + rest + " 個" : "");
+      fold.appendChild(tw);
+      fold.appendChild(ttl);
+      fold.appendChild(names);
+    });
+  }
+
   function applyProjectFilter() {
     const active = new Set();
     fchips.forEach(function (chip) {
@@ -2189,6 +2270,7 @@ repeat, each test a <b>tracer bullet</b>.
       c.hidden = empty;
     });
     if (bempty) bempty.hidden = !empty;
+    renderFolds(active);
   }
 
   fchips.forEach(function (chip) {
