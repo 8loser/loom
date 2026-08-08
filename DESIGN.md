@@ -21,42 +21,24 @@
 
 parent issue 在結構上提供四件事：agent 的 prompt context、衝突域宣告（同 parent 的 child issue 序列執行）、kanban swimlane、merge 單位。同一個 parent issue 的檔案固定放在 `<repo>/.loom/issues/<parent-slug>/`，parent 的描述與各 child issue 都在裡面；位置固定、不可設，理由同舊設計的 `.loom/specs`。
 
-## 提示詞的來源
+## 提示詞
 
-loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 plugin，而是把它的內容裁剪後**內嵌成 loom 的預設提示詞**。MIT 授權，vendored 的模板頂部保留版權聲明。
+loom 的提示詞是內建的出廠預設，per-workspace 可在 web UI 覆寫。內建版本只提供角色邊界與輸入資料的位置，不依賴外部 plugin、不要求專案安裝特定 prompt 套件，也不把外部模板當相容目標。
 
-不裝 plugin 的理由：loom 的流水線行為若依賴外部 plugin，上游一更新 coder 和 reviewer 的行為就變了，而 loom 這邊沒有任何訊號。內嵌之後提示詞是 loom 自己的資產，可編輯、可裁剪、版本固定。
-
-**價值在詞彙。** 他的 skill 裡是壓縮過的工程術語：`tracer bullet`、`vertical slice`、`blast radius`、`expand–contract`、`seam`、`deep module`、`frontier`。每個都是一段話的縮寫而 agent 認得。這決定了 loom 自己那層外框要多薄 -- **外框只負責遞交材料，不重講一遍怎麼做事**。把 `tracer bullet` 展開成「請把工作切成能獨立驗證的小塊」等於把壓縮效果丟掉，還跟內嵌的說法打架。
-
-| loom 的提示詞 | 內嵌來源 |
+| loom 的提示詞 | 責任 |
 | --- | --- |
-| chat | `to-spec` 的 parent issue 模板（含 Testing Decisions）+ `to-tickets` 的 vertical slice 規則、expand–contract、`Blocked by` |
-| coder | `implement` + `tdd`（攤平） |
-| issue reviewer | `code-review` |
-| parent issue reviewer | `code-review` + `codebase-design` 的深模組與 seam 視角 |
+| chat | 把粗略想法整理成一個 parent issue 與一組排序後的 child issue |
+| coder | 在 worktree 裡實作單一 child issue |
+| issue reviewer | 檢查單一 child issue 的 diff 是否符合 parent/child 描述與專案背景 |
+| parent issue reviewer | 檢查整個 parent issue 合併後的跨 child 一致性與遺漏 |
 
-### 攤平時要改的一條規則
+chat 的提示詞要產出 parent issue 的問題、目標、限制、測試指引、跨 parent 依賴，以及 child issue 的順序、依賴、人類判斷需求與 e2e 需求。coder 不在無人值守階段新增需求或重新規劃 parent，它只讀 parent/child 描述並完成當前 child。
 
-`tdd` 要求「Test only at pre-agreed seams. Before writing any test, confirm them with the user」。無人值守流程裡沒有 user 可以確認。
-
-他自己已經解了：`to-spec` 的流程要求先勾勒 seam 並與人確認，parent issue 模板有 **Testing Decisions** 一節。所以 seam 在 chat 階段（人在場）決定並寫進 parent issue 的描述，coder 從那裡讀。攤平時把「跟使用者確認」改寫成「seam 已定義在 parent issue 的 Testing Decisions，照那個做，不要自己新增」。
-
-因此 chat 的提示詞有一條硬性要求：**必須產出 Testing Decisions**。
-
-### 不內嵌的部分
-
-`triage`、`grilling`、`domain-modeling`、`research`、`prototype` 是 HITL 或在 loom 流水線之外，人自己在終端機用就好。
-
-**`wayfinder` 尤其不融。** 它是規劃階段：決策票、fog of war、一次一個決定，產出的是「路怎麼走清楚了」，之後才輪到 parent issue。loom 的輸入在那之後兩層。硬融進來會讓看板同時裝決策票和實作票兩種本質不同的卡片。
-
-### 專案自己的詞彙表
-
-他的 skill 反覆引用 `CONTEXT.md` 與 `docs/adr/`。對省 token 來說這層比通用工程術語更有效 -- 通用術語是他的專業，`slot`、`occupancy`、`week strip` 在你這裡是什麼意思是你的專業。
+### 專案背景
 
 **專案背景進 agent 的唯一管道是 `.loom/context.md`。** loom 讀它，填成 `{context_md}` 模板變數，coder 與兩個 reviewer 的提示詞裡都有一個 `<context>` 區塊。專案自己的 `CLAUDE.md`、`CONTEXT.md`、`CODING_STANDARDS.md` 都不參與，提示詞也不叫 agent 自己去找那些檔案 -- 那等於讓專案的環境決定 agent 看到什麼，跟「專案層擋掉」的立場衝突（見「agent 繼承什麼環境」）。
 
-**內容放什麼由使用者決定，loom 不規定。** 提示詞只說「這是這個專案要你先知道的事」，整份原樣塞進 `<context>` 區塊，不解析、不分節、不假設裡面是詞彙表還是編碼規範。loom 唯一預設的判準是 issue reviewer 的 smell baseline，那份清單內建在提示詞裡，跟這個檔案無關；`<context>` 講到的事情跟 baseline 抵觸時以 `<context>` 為準。
+**內容放什麼由使用者決定，loom 不規定。** 提示詞只說「這是這個專案要你先知道的事」，整份原樣塞進 `<context>` 區塊，不解析、不分節、不假設裡面是詞彙表還是編碼規範。loom 只把這份內容交給 agent，不從中推導設定；`<context>` 講到的事情優先於內建提示詞的一般性指引。
 
 **為什麼是 loom 自己的檔案，不是讀專案既有的 `CONTEXT.md`。** 讀既有檔案在技術上更省事，但那是把 loom 的行為綁在「這個 repo 剛好有沒有那個檔案、裡面剛好寫了什麼」上。loom 要能單獨運作，設定空間跟專案既有的分開。要用既有內容就自己複製過去，那是一次明確的決定，不是隱含的耦合。
 
@@ -64,13 +46,9 @@ loom 不依賴 [mattpocock/skills](https://github.com/mattpocock/skills) 這個 
 
 **讀主 checkout 的版本，不是 worktree 的。** 跟 parent issue 的描述一致。某條 parent issue branch 改了 `.loom/context.md` 不該立刻對別條 branch 正在跑的 coder 生效，那會讓同一批平行的 parent issue 拿到不同背景而且沒有訊號。
 
-沒有這個檔案時 `{context_md}` 是空字串，模板留一個空的 `<context>` 區塊，agent 照樣跑，reviewer 退回只用 smell baseline 判斷。設定頁不回報它在不在：寫不寫是使用者的事，沒有它也不擋執行，多一個欄位只是多一個要維護的東西。
+沒有這個檔案時 `{context_md}` 是空字串，模板留一個空的 `<context>` 區塊，agent 照樣跑。設定頁不回報它在不在：寫不寫是使用者的事，沒有它也不擋執行，多一個欄位只是多一個要維護的東西。
 
 **只有讀，沒有寫。** loom 沒有任何角色寫得了這個檔案：coder 的提示詞禁止碰 `.loom/`（那條規則是為了保護 orchestrator 狀態），chat 的提示詞禁止改任何檔案。要建立或更新就人自己編輯，它在 repo 裡，跟改任何一個 markdown 檔一樣。這是刻意的，理由與代價記在「明確不做」。
-
-**詞彙表路徑仍然寫在提示詞裡**，而提示詞可編輯 -- 路徑本身就是設定。另開欄位等於同一件事有兩個地方可以改，遲早不一致。
-
-人在終端機用他的 plugin 手動跑 `/to-spec` 產 parent issue，loom 照樣讀得到那些檔案，兩者不衝突。
 
 ## 狀態機
 
@@ -245,7 +223,7 @@ merge 本身不需要額外的鎖，orchestrator 是單一事件迴圈，兩個 
 
 `blocked_by` 是同一種邊，出現在兩個 scope，差別只在預設：
 
-**同一個 parent 內（child → child）：止血。** `/to-tickets` 強制每個 ticket 宣告 blocking edges：
+**同一個 parent 內（child → child）：止血。** child 可以用 front matter 宣告 blocking edges：
 
 ```
 01-fix-e2e-page-object              Blocked by: None
@@ -257,7 +235,7 @@ merge 本身不需要額外的鎖，orchestrator 是單一事件迴圈，兩個 
 07-mobile-e2e-coverage              Blocked by: 01, 06
 ```
 
-預設照編號跑（to-tickets 產出的編號本身就是拓撲排序），blocked_by 只在有 child 卡住時用來判斷哪些後續不受影響。上例中 02 進 blocked，03、04、06、07 都直接或間接依賴它，但 05 可以繼續做，parent 不會整條停擺等人半夜起來處理。
+預設照編號跑（編號本身視為拓撲排序），blocked_by 只在有 child 卡住時用來判斷哪些後續不受影響。上例中 02 進 blocked，03、04、06、07 都直接或間接依賴它，但 05 可以繼續做，parent 不會整條停擺等人半夜起來處理。
 
 **不用來平行化。** 一個 parent 一個 worktree，兩個 child 同時改同一份 checkout 會撞。邊只改變「跳過哪些」，不改變「同時幾個在跑」。
 
@@ -595,7 +573,7 @@ orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化�
 
 這是收下 `user` 的代價，接受它換到的是「個人規範只寫一份」。要縮回什麼都不載入是把值改回 `""`（不是 `local` -- 2.1.220 的舊註記說 `project,local` 不載入全域 `CLAUDE.md`，2.1.221 實測是載入的）。
 
-**為什麼專案層仍然擋掉。** 更早的版本走 `project,local`，理由是專案 `CLAUDE.md` 是現成的 per-repo 規範管道，loom 完全不用參與。放棄它換來的是一條說得完的規則：agent 在專案那側看到什麼，只由 loom 的提示詞決定。一旦專案環境的一部分會進去，就得回答「哪些 skill、哪些 MCP、哪些 plugin 要用」，而答案會是角色乘上專案的矩陣，那是設定頁裡長不完的東西。專案背景改走 `.loom/context.md`（見「專案自己的詞彙表」），內容是 loom 讀進來填的，不是環境帶的。
+**為什麼專案層仍然擋掉。** 更早的版本走 `project,local`，理由是專案 `CLAUDE.md` 是現成的 per-repo 規範管道，loom 完全不用參與。放棄它換來的是一條說得完的規則：agent 在專案那側看到什麼，只由 loom 的提示詞決定。一旦專案環境的一部分會進去，就得回答「哪些 skill、哪些 MCP、哪些 plugin 要用」，而答案會是角色乘上專案的矩陣，那是設定頁裡長不完的東西。專案背景改走 `.loom/context.md`（見「專案背景」），內容是 loom 讀進來填的，不是環境帶的。
 
 **專案側的能力要補回來是 `--plugin-dir`，不是把 `--setting-sources` 放寬。** 它可重複、session-only、不受 `--setting-sources` 影響，實測在空清單下照樣載得到 plugin 的 skill。MCP 同理走 `--mcp-config` 配現有的 `--strict-mcp-config`，是純白名單。兩個都是「明確列舉」語意；現在都沒有需求，所以都不帶。
 
@@ -645,15 +623,14 @@ SQLite 存兩類東西：
 
 **只有被編輯過的角色才在 DB 裡有一列**，沒有那一列就讀內建預設。原本寫的是「新增 workspace 時複製一份內建預設」，實作時改成這樣：複製的話，內建預設之後有任何修正都不會傳播到已存在的 workspace，而那些 workspace 的擁有者根本沒動過那個角色的模板；而且「這份是不是還停在出廠預設」得拿內容跟預設做字串比對才知道，改成有沒有那一列就直接是答案。「還原預設」因此是刪掉那一列，不是複製一份預設寫回去。
 
-**預設內容就是內嵌自 mattpocock/skills 的攤平版本**（見「提示詞的來源」），整份可編輯。每個角色下方列出可用變數，設定頁附「還原預設」把它復原成內嵌的出廠版本。
+**預設內容是 loom 自己的出廠版本**（見「提示詞」），整份可編輯。每個角色下方列出可用變數，設定頁附「還原預設」把它復原成內建的出廠版本。
 
 模板大致的形狀：
 
 ```
-[內嵌的 implement + tdd 內容]
-
-seam 已定義在下面 parent issue 的 Testing Decisions，照那個做，不要自己新增。
-交棒前自己跑一次 typecheck 與 unit test。
+Read the parent issue and child issue below before changing code.
+Implement only the requested child issue.
+交棒前自己跑一次 typecheck 與相關測試。
 不要修改 .loom 底下的任何檔案。
 
 <parent_issue>{parent_md}</parent_issue>
@@ -665,11 +642,11 @@ seam 已定義在下面 parent issue 的 Testing Decisions，照那個做，不�
 
 為什麼要可編輯：內嵌的內容是通用的，不知道你這個專案的慣例、不知道 loom 的失敗紀錄要怎麼餵、不知道測試輸出只給 tail 200 行。那些是 loom 與專案的上下文，寫死在程式碼裡就沒得調。
 
-**coder 只有一份模板，不分首次與重試。** `{last_failure}` 為空時那一段就是空的。重試輪其實可以加上 `diagnosing-bugs` 的內容，但先不加 -- 多一份模板就多一份要維護的分岔，等重試品質被證明不夠再說。
+**coder 只有一份模板，不分首次與重試。** `{last_failure}` 為空時那一段就是空的。重試輪其實可以另外設計專用指引，但先不加 -- 多一份模板就多一份要維護的分岔，等重試品質被證明不夠再說。
 
 **不做版本歷史，編輯就是覆蓋。** 因此同一個 child 的第一次與第三次嘗試可能用不同版本的模板，`runs` 也不記錄用了哪一版。這是刻意的：看到 coder 一直踩同一個坑、改模板、讓當前重試立刻吃到新版，正是這個編輯功能的用途；凍結成「開工當下那一版」會把它變成「改了但這一輪不算」。代價是模板改壞了退不回上一版，只能重打或按還原預設回出廠版。
 
-**實作：** 出廠預設在 `src/prompts.ts`（四個角色的攤平版本，頂部保留 MIT 版權聲明）；per-workspace 的編輯版存在 `prompts` table。`agent.ts` 每次呼叫才讀 DB，不快取 -- 那是「當前重試立刻吃到新版」的實作方式。「還原預設」是把那一列刪掉，讀取時自然落回內建預設，不是複製一份預設寫回去，所以 `isDefault` 永遠等於「DB 裡沒有這一列」。變數替換認得的變數才換，不認得的原樣留著（打錯字時看得到 `{spce_md}` 留在 prompt 裡，比默默變成空字串好查）。
+**實作：** 出廠預設在 `src/prompts.ts`（四個角色的 loom 自有版本）；per-workspace 的編輯版存在 `prompts` table。`agent.ts` 每次呼叫才讀 DB，不快取 -- 那是「當前重試立刻吃到新版」的實作方式。「還原預設」是把那一列刪掉，讀取時自然落回內建預設，不是複製一份預設寫回去，所以 `isDefault` 永遠等於「DB 裡沒有這一列」。變數替換認得的變數才換，不認得的原樣留著（打錯字時看得到 `{spce_md}` 留在 prompt 裡，比默默變成空字串好查）。
 
 ### 新增 workspace 時的資料夾選取
 
@@ -689,7 +666,7 @@ parent issue 固定放 `<repo>/.loom/issues/`。人可以直接在底下建 `<pa
 
 **child 檔沒有 front matter 時就地補一份 `status: draft`、`e2e: false`、`blocked_by: []`。** 補寫做在 `loadIssues` 裡，它是所有讀取路徑的共同入口 -- 另開一個 normalize 步驟就得在每個呼叫端記得先跑一次，漏掉一個就是一條會讀到沒有 front matter 的檔案而炸掉的路徑。補上的內容不另外 commit：這條路徑包含唯讀的看板查詢，那份 front matter 由下一次狀態轉移的 `git add` 一併帶走。落點是 draft，所以補完也不會有東西自己跑起來。
 
-**不讀 body 裡的任何欄位。** 早期版本會讀 mattpocock/skills 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 的 child 有十一個狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by」），所以那種錯誤會安靜地等到第一次有 child blocked 才發作，且症狀是「該擋的沒擋」。
+**不讀 body 裡的任何欄位。** 早期版本會讀 markdown body 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 的 child 有十一個狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by」），所以那種錯誤會安靜地等到第一次有 child blocked 才發作，且症狀是「該擋的沒擋」。
 
 手寫的 child 要宣告依賴就自己寫 front matter 的 `blocked_by`。正常執行照檔名編號序列走，編號排對了空著也能跑。
 
@@ -783,8 +760,6 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 | mergeable 自動 merge 白名單 | 人工閘門真的成為瓶頸，且有信任的 parent 類型 |
 | `--resume` 接回中斷的 agent | 重跑成本高到不可接受，且驗證過中斷點的行為 |
 | 用 `Blocked by` 平行執行同 parent 的 child | 不加。一個 parent 一個 worktree，平行改同一份 checkout 會撞 |
-| 自己發明 parent issue 與 ticket 模板 | 不加。內嵌 `to-spec` 與 `to-tickets` 的 |
-| 依賴 mattpocock/skills plugin | 不加。內嵌後版本固定，上游更新不會靜默改變流水線行為 |
 | 內嵌 `wayfinder` | 不加。它是規劃階段，看板不該同時裝決策票和實作票 |
 | coder 的重試專用模板（含 `diagnosing-bugs`） | 重試品質被證明不夠時 |
 | 詞彙表與規範文件的路徑欄位 | 不加。路徑寫在可編輯的提示詞裡，agent 有 Read 工具 |
@@ -795,7 +770,7 @@ agent 的 stream-json 即時轉發到 SSE，web 上看得到 agent 現在在做�
 | 兩層狀態同步（parent 也有完整狀態機） | 不加。parent 狀態一律由 child 聚合算出 |
 | 多 provider 抽象層 | 要接非 Claude 的執行體 |
 | 指令設定欄位（安裝 / typecheck / test / e2e） | 要接沒有 `package.json` 的專案 |
-| 讀外部工具的狀態詞彙（skills 的 `Status:` / `Blocked by:`） | 不加，理由見「人手寫的 parent issue」 |
+| 讀 markdown body 的狀態詞彙（`Status:` / `Blocked by:`） | 不加，理由見「人手寫的 parent issue」 |
 | 可設定的 issue 資料夾 | 不加。固定 `.loom/issues`，換位置的自由度換不到那條路徑驗證與整套設定 UI 的成本 |
 | 已合併 parent 搬進 `archived` | 不加。`merged: true` 已經是狀態的唯一事實來源，搬移會讓所在位置變成第二個來源，而 DB 記錄與重名檢查都以資料夾名為 key |
 | 已合併 parent 的歷史檢視 | 需要查跨 parent 的統計，而 issues 資料夾與 git log 答不出來 |

@@ -131,7 +131,7 @@ const REVIEW_EXCLUDED = [
   ":(exclude)*/__snapshots__/*",
 ];
 
-/** 一個 spec 分支相對 main 的完整 diff，給 spec_reviewer 看跨 issue 的全貌。 */
+/** 一個 parent issue 分支相對 main 的完整 diff，給 parent issue reviewer 看跨 child 的全貌。 */
 export function diffForReview(worktreePath: string, fromRef: string, toRef = "HEAD"): string {
   return git(worktreePath, ["diff", `${fromRef}..${toRef}`, "--", ".", ...REVIEW_EXCLUDED]);
 }

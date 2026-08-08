@@ -839,6 +839,41 @@
 
   .chat {
     grid-template-columns: minmax(0, 1fr) 372px;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .chtabs {
+    grid-column: 1 / -1;
+    flex: none;
+    display: flex;
+    gap: 2px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .chwtab {
+    appearance: none;
+    border: 1px solid transparent;
+    background: none;
+    color: var(--muted);
+    padding: 4px 11px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family:
+      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .chwtab:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .chwtab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .chwtab[aria-selected="true"] {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
   }
   .thread {
     overflow: auto;
@@ -1517,45 +1552,45 @@
               </div>
             </div>
 
-          <!-- lane 5：跨 parent 依賴示範，等另一個 parent 合併才開跑 -->
-          <button
-            class="lane"
-            type="button"
-            data-state="queued"
-            data-spec="slot-recurrence-rules"
-            data-project="clinic-web"
-            data-branch="issue/slot-recurrence-rules"
-            data-dep="mobile-slot-settings"
-            data-cost="—"
-            data-tok="—"
-            data-behind="等依賴合併"
-            data-progress="0 / 3 issue"
-            data-elapsed="尚未開始"
-            data-extra="這個 parent issue 等 mobile-slot-settings 合併進 main 才開跑；開跑時從 main 分支，自然吃得到它的產出。"
-          >
-            <span class="proj">clinic-web</span>
-            <span class="name">slot-recurrence-rules</span>
-            <span class="branch">issue/slot-recurrence-rules</span>
-            <span class="spacer"></span>
-            <span class="wait">等 <b>mobile-slot-settings</b> 合併</span>
-          </button>
+            <!-- lane 5：跨 parent 依賴示範，等另一個 parent 合併才開跑 -->
+            <button
+              class="lane"
+              type="button"
+              data-state="queued"
+              data-spec="slot-recurrence-rules"
+              data-project="clinic-web"
+              data-branch="issue/slot-recurrence-rules"
+              data-dep="mobile-slot-settings"
+              data-cost="—"
+              data-tok="—"
+              data-behind="等依賴合併"
+              data-progress="0 / 3 issue"
+              data-elapsed="尚未開始"
+              data-extra="這個 parent issue 等 mobile-slot-settings 合併進 main 才開跑；開跑時從 main 分支，自然吃得到它的產出。"
+            >
+              <span class="proj">clinic-web</span>
+              <span class="name">slot-recurrence-rules</span>
+              <span class="branch">issue/slot-recurrence-rules</span>
+              <span class="spacer"></span>
+              <span class="wait">等 <b>mobile-slot-settings</b> 合併</span>
+            </button>
 
-          <div class="cell">
-            <div class="card" tabindex="0" role="button">
-              <span class="id"><b>01</b> recurrence-rrule-parser</span>
+            <div class="cell">
+              <div class="card" tabindex="0" role="button">
+                <span class="id"><b>01</b> recurrence-rrule-parser</span>
+              </div>
+              <div class="card" tabindex="0" role="button">
+                <span class="id"><b>02</b> slot-recurrence-ui</span>
+              </div>
+              <div class="card" tabindex="0" role="button">
+                <span class="id"><b>03</b> recurrence-e2e</span>
+                <span class="foot"><span class="e2e">E2E</span></span>
+              </div>
             </div>
-            <div class="card" tabindex="0" role="button">
-              <span class="id"><b>02</b> slot-recurrence-ui</span>
-            </div>
-            <div class="card" tabindex="0" role="button">
-              <span class="id"><b>03</b> recurrence-e2e</span>
-              <span class="foot"><span class="e2e">E2E</span></span>
-            </div>
-          </div>
-          <div class="cell"></div>
-          <div class="cell"></div>
-          <div class="cell"></div>
-          <div class="cell"></div>
+            <div class="cell"></div>
+            <div class="cell"></div>
+            <div class="cell"></div>
+            <div class="cell"></div>
 
             <button class="fold" type="button" data-fold-kind="draft"></button>
 
@@ -1807,6 +1842,17 @@
       role="tabpanel"
       aria-label="討論"
     >
+      <div class="chtabs" role="tablist" aria-label="討論的 workspace">
+        <button class="chwtab" type="button" role="tab" aria-selected="true">
+          clinic-web
+        </button>
+        <button class="chwtab" type="button" role="tab" aria-selected="false">
+          booking-widget
+        </button>
+        <button class="chwtab" type="button" role="tab" aria-selected="false">
+          clinic-admin
+        </button>
+      </div>
       <div
         style="
           display: grid;
@@ -2005,7 +2051,7 @@
             <span class="label">提示詞</span>
             <span
               style="font-size: 11.5px; color: var(--muted); margin-left: auto"
-              >預設內容取自 mattpocock/skills，MIT</span
+              >loom 內建預設，可依 workspace 覆寫</span
             >
           </div>
 
@@ -2111,7 +2157,7 @@ repeat, each test a <b>tracer bullet</b>.
     const mergeable = state === "mergeable";
 
     const dep = lane.dataset.dep;
-    set("sp-state", dep ? "等 " + dep + " 合併" : (STATE_LABEL[state] || state));
+    set("sp-state", dep ? "等 " + dep + " 合併" : STATE_LABEL[state] || state);
     set("sp-name", lane.dataset.spec);
     set("sp-branch", lane.dataset.branch);
     set("sp-prog", lane.dataset.progress);
