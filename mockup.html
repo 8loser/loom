@@ -83,6 +83,41 @@
     display: none !important;
   }
 
+  input,
+  textarea,
+  select,
+  [contenteditable] {
+    color: var(--text);
+    caret-color: var(--text);
+    font: inherit;
+  }
+  select.in {
+    appearance: none;
+    width: 100%;
+    font-size: 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 5px 8px;
+    background: var(--bg);
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) calc(50% - 1px),
+      calc(100% - 9px) calc(50% - 1px);
+    background-size:
+      5px 5px,
+      5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 26px;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--muted);
+    opacity: 1;
+  }
+
   :root {
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
@@ -113,6 +148,7 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
+    caret-color: var(--text);
     font-family:
       ui-sans-serif,
       -apple-system,
@@ -143,7 +179,9 @@
 
   .app {
     display: grid;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows:
+      auto minmax(48px, var(--attention-height, 86px))
+      2px 1fr;
     height: 100dvh;
     overflow: hidden;
   }
@@ -203,7 +241,7 @@
     cursor: pointer;
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
+    font-size: 11.5px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -227,6 +265,8 @@
     display: flex;
     flex-direction: column;
     border-bottom: 1px solid var(--border);
+    min-height: 0;
+    overflow: auto;
   }
   .banner {
     display: flex;
@@ -280,7 +320,7 @@
   .btn {
     appearance: none;
     font: inherit;
-    font-size: 12px;
+    font-size: 11.5px;
     padding: 4px 12px;
     border-radius: 3px;
     border: 1px solid var(--border-strong);
@@ -314,6 +354,36 @@
     grid-template-columns: minmax(0, 1fr) 372px;
     min-height: 0;
   }
+  #pane-board.main {
+    grid-template-columns: minmax(320px, 1fr) 2px minmax(
+        260px,
+        var(--detail-width, 372px)
+      );
+  }
+  .resizer {
+    background: var(--border);
+    flex: none;
+    position: relative;
+    touch-action: none;
+  }
+  .resizer:hover,
+  .resizer.dragging,
+  .resizer:focus-visible {
+    background: var(--accent);
+    outline: none;
+  }
+  .resizer::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+  .top-resizer {
+    cursor: row-resize;
+  }
+  .split-resizer {
+    cursor: col-resize;
+    min-height: 0;
+  }
   .panes {
     min-height: 0;
     overflow: hidden;
@@ -343,8 +413,8 @@
   }
   .grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(178px, 1fr));
-    min-width: 900px;
+    grid-template-columns: repeat(4, minmax(178px, 1fr));
+    min-width: 760px;
   }
 
   .bhead {
@@ -452,6 +522,15 @@
   .lane.on {
     box-shadow: inset 2px 0 0 var(--accent);
   }
+  .lane .chev {
+    font-size: 8px;
+    flex: none;
+    color: var(--muted);
+    transition: transform 0.12s ease;
+  }
+  .lane.folded .chev {
+    transform: rotate(-90deg);
+  }
   .lane .name {
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -512,7 +591,7 @@
     border-bottom: 1px solid var(--border);
     min-height: 62px;
   }
-  .cell:nth-child(6n + 5) {
+  .cell:nth-child(5n + 4) {
     border-right: none;
   }
 
@@ -628,57 +707,9 @@
     padding: 3px 2px;
   }
 
-  .fold {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    width: 100%;
-    text-align: left;
-    appearance: none;
-    border: 0;
-    border-bottom: 1px solid var(--border);
-    background: none;
-    cursor: pointer;
-    padding: 10px 12px;
-    color: var(--muted);
-    font: inherit;
-  }
-  .fold:hover {
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  .fold:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-  .fold .tw {
-    font-size: 8px;
-    flex: none;
-  }
-  .fold .ttl {
-    font-family:
-      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    flex: none;
-  }
-  .fold .names {
-    font-family:
-      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
-    color: var(--idle);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
   /* ---------- detail ---------- */
 
   .detail {
-    border-left: 1px solid var(--border);
     background: var(--surface);
     min-height: 0;
     overflow: hidden;
@@ -754,7 +785,7 @@
     margin: 3px 0 0;
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.4;
   }
@@ -838,11 +869,15 @@
   /* ---------- chat ---------- */
 
   .chat {
-    grid-template-columns: minmax(0, 1fr) 372px;
+    grid-template-columns: 210px minmax(320px, 1fr) 2px minmax(
+        260px,
+        var(--draft-width, 372px)
+      );
     grid-template-rows: auto minmax(0, 1fr);
   }
   .chtabs {
-    grid-column: 1 / -1;
+    grid-column: 1 / 3;
+    grid-row: 1;
     flex: none;
     display: flex;
     gap: 2px;
@@ -860,7 +895,7 @@
     cursor: pointer;
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 12px;
+    font-size: 11.5px;
   }
   .chwtab:hover {
     color: var(--text);
@@ -874,6 +909,105 @@
     color: var(--accent);
     background: var(--accent-soft);
     border-color: var(--accent);
+  }
+  .discussion-main {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .chat > .split-resizer {
+    grid-column: 3;
+    grid-row: 1 / -1;
+  }
+  .chat > .draft {
+    grid-column: 4;
+    grid-row: 1 / -1;
+  }
+  .chsessions {
+    grid-column: 1;
+    grid-row: 2;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .chsessions .hd {
+    padding: 13px 14px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .chsessions .hd .btn {
+    margin-left: auto;
+    padding: 2px 8px;
+  }
+  .chsessions ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .chsessions li {
+    border-bottom: 1px solid var(--border);
+  }
+  .chsessions .sitem {
+    position: relative;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-left: 2px solid transparent;
+    background: none;
+    cursor: pointer;
+    padding: 9px 28px 9px 14px;
+    color: var(--text);
+    font-family:
+      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+  }
+  .chsessions .stitle {
+    display: block;
+  }
+  .chsessions .sdel {
+    position: absolute;
+    top: 50%;
+    right: 5px;
+    transform: translateY(-50%);
+    appearance: none;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 3px;
+    opacity: 0;
+  }
+  .chsessions .sitem:hover .sdel,
+  .chsessions .sitem[aria-current="true"] .sdel {
+    opacity: 1;
+  }
+  .chsessions .sdel:hover {
+    color: var(--crit);
+    background: var(--crit-soft);
+  }
+  .chsessions .sitem:hover {
+    background: var(--surface-2);
+  }
+  .chsessions .sitem:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .chsessions .sitem[aria-current="true"] {
+    border-left-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .chsessions .smeta {
+    display: block;
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 2px;
   }
   .thread {
     overflow: auto;
@@ -929,7 +1063,6 @@
   }
 
   .draft {
-    border-left: 1px solid var(--border);
     background: var(--surface);
     overflow: auto;
   }
@@ -941,7 +1074,7 @@
     margin: 4px 0 0;
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
   }
   .ilist {
@@ -974,6 +1107,15 @@
     border-radius: 2px;
     background: var(--warn-soft);
     color: var(--warn);
+    flex: none;
+  }
+  .verify {
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: var(--accent-soft);
+    color: var(--accent);
     flex: none;
   }
   .e2e.human {
@@ -1032,7 +1174,7 @@
     color: var(--text);
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 12px;
+    font-size: 11.5px;
   }
   .wsrail .item:hover {
     background: var(--surface-2);
@@ -1078,12 +1220,18 @@
     margin: 0;
   }
   .sheet {
-    max-width: 680px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
     padding: 26px 24px 40px;
+    display: grid;
+    grid-template-columns: minmax(0, 680px);
+    justify-content: center;
+    align-content: start;
   }
   .sheet h2 {
     margin: 0 0 4px;
-    font-size: 17px;
+    font-size: 14px;
     font-weight: 600;
     text-wrap: balance;
   }
@@ -1153,9 +1301,22 @@
     border-color: var(--accent);
     background: var(--accent-soft);
   }
+  .provcfg {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px;
+  }
+  .provcfg select.in {
+    width: auto;
+    min-width: 150px;
+  }
 
   .ptext {
     margin: 0;
+    width: 100%;
+    min-height: 340px;
+    resize: vertical;
     border: 1px solid var(--border-strong);
     border-radius: 3px;
     background: var(--bg);
@@ -1165,36 +1326,169 @@
     font-size: 12px;
     line-height: 1.6;
     white-space: pre-wrap;
+    color: var(--text);
     overflow-x: auto;
   }
-  .ptext b {
-    color: var(--accent);
-    font-weight: 400;
+  .ptext:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 
-  .pvars {
-    margin: 8px 0 0;
-    font-family:
-      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
-    color: var(--muted);
+  .sfoot {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 12px 0 4px;
+    margin-top: 24px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
   }
-  .pfoot {
+  .sfoot-msg {
+    font-size: 11.5px;
+    color: var(--ok);
+  }
+  .sfoot-msg[hidden] {
+    display: none;
+  }
+  .sfoot-dirty {
+    margin-right: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--warn);
+  }
+  .sfoot-dirty[hidden] {
+    display: none;
+  }
+  .sfoot-dirty .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--warn);
+  }
+
+  /* ---------- modal ---------- */
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.42);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay[hidden] {
+    display: none;
+  }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    width: min(520px, 92vw);
+    max-height: 86vh;
+    overflow: auto;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  }
+  .mhead {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-top: 12px;
-    padding-top: 11px;
-    border-top: 1px solid var(--border);
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
   }
-  .pfoot .lock {
+  .mhead h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
     font-family:
       ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
+  }
+  .mbody {
+    padding: 16px 18px;
+  }
+  .mbody .field:last-child {
+    border-bottom: none;
+  }
+  .mnote {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0 0 14px;
+    max-width: 46ch;
+  }
+  .in[role="note"] {
+    border-style: dashed;
+    background: transparent;
     color: var(--muted);
   }
-  .pfoot .btn {
+  input.in {
+    width: 100%;
+    font: inherit;
+    outline: none;
+  }
+  input.in:focus {
+    border-color: var(--accent);
+  }
+
+  /* ---------- autocomplete ---------- */
+
+  .ac {
+    position: relative;
+  }
+  .ac-list {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    z-index: 20;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    max-height: 180px;
+    overflow: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+  .ac-list[hidden] {
+    display: none;
+  }
+  .ac-list li {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-family:
+      ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .ac-list li:hover,
+  .ac-list li.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .ac-empty {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .mfoot {
+    display: flex;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+  }
+  .mfoot .btn.primary {
     margin-left: auto;
+  }
+  .mfoot .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>
 
@@ -1233,9 +1527,6 @@
     </nav>
 
     <div class="meters">
-      <span class="meter"
-        ><span class="label">同時執行</span><span class="v">2 / 2</span></span
-      >
       <span class="meter"
         ><span class="label">今日 token</span
         ><span class="v"
@@ -1276,12 +1567,18 @@
     </div>
   </section>
 
+  <div
+    class="resizer top-resizer"
+    role="separator"
+    aria-orientation="horizontal"
+    aria-label="調整上方區塊高度"
+  ></div>
+
   <div class="panes">
     <!-- ======================= 看板 ======================= -->
     <div class="pane main on" id="pane-board" role="tabpanel" aria-label="看板">
       <div class="board">
         <div class="bhead">
-          <span class="label">專案</span>
           <button
             class="fchip"
             type="button"
@@ -1315,7 +1612,6 @@
             <div class="colhead"><span class="label">待處理</span></div>
             <div class="colhead"><span class="label">實作中</span></div>
             <div class="colhead"><span class="label">審查中</span></div>
-            <div class="colhead"><span class="label">測試中</span></div>
             <div class="colhead"><span class="label">完成</span></div>
 
             <!-- lane 1 -->
@@ -1369,7 +1665,6 @@
               </div>
             </div>
             <div class="cell"></div>
-            <div class="cell"></div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
                 <span class="id"><b>01</b> fix-e2e-page-object</span>
@@ -1395,7 +1690,7 @@
               data-behind="0 個 code commit"
               data-progress="2 / 7 issue 完成"
               data-elapsed="38m"
-              data-extra="目前 03 審查中，最後一次 rebase 在 6 分鐘前"
+              data-extra="目前 03 驗證中（e2e），最後一次 rebase 在 6 分鐘前"
             >
               <span class="proj">clinic-web</span>
               <span class="name">mobile-appointment-week-strip</span>
@@ -1432,12 +1727,11 @@
                 <span class="id"><b>03</b> phantom-occupancy-row</span>
                 <span class="foot">
                   <span class="pulse" aria-hidden="true"></span>
-                  <span>reviewer 51s</span>
-                  <span>+184 −61</span>
+                  <span>e2e 2m 10s</span>
+                  <span class="verify">驗證中</span>
                 </span>
               </div>
             </div>
-            <div class="cell"></div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
                 <span class="id"><b>01</b> week-strip-today-first</span>
@@ -1495,7 +1789,6 @@
               </div>
             </div>
             <div class="cell"></div>
-            <div class="cell"></div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
                 <span class="id"><b>01</b> onboarding-state-machine</span>
@@ -1529,7 +1822,6 @@
               </span>
             </button>
 
-            <div class="cell"></div>
             <div class="cell"></div>
             <div class="cell"></div>
             <div class="cell"></div>
@@ -1590,14 +1882,18 @@
             <div class="cell"></div>
             <div class="cell"></div>
             <div class="cell"></div>
-            <div class="cell"></div>
-
-            <button class="fold" type="button" data-fold-kind="draft"></button>
-
-            <button class="fold" type="button" data-fold-kind="merged"></button>
           </div>
         </div>
       </div>
+
+      <div
+        class="resizer split-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="調整看板與詳情寬度"
+        data-resize-pane="pane-board"
+        data-resize-var="--detail-width"
+      ></div>
 
       <aside class="detail">
         <div class="dpanel" id="d-spec" hidden>
@@ -1853,7 +2149,43 @@
           clinic-admin
         </button>
       </div>
+      <nav class="chsessions" aria-label="討論清單">
+        <div class="hd">
+          <span class="label">討論</span>
+          <button class="btn" type="button" id="new-session">新增</button>
+        </div>
+        <ul id="session-list">
+          <li>
+            <div class="sitem" role="button" tabindex="0" aria-current="true">
+              <span class="stitle">週檢視 iPad 直向</span>
+              <span class="smeta">草稿 · week-strip-ipad-portrait</span>
+              <button class="sdel" type="button" aria-label="刪除討論">
+                ×
+              </button>
+            </div>
+          </li>
+          <li>
+            <div class="sitem" role="button" tabindex="0">
+              <span class="stitle">時段衝突警告</span>
+              <span class="smeta">草稿</span>
+              <button class="sdel" type="button" aria-label="刪除討論">
+                ×
+              </button>
+            </div>
+          </li>
+          <li>
+            <div class="sitem" role="button" tabindex="0">
+              <span class="stitle">匯出排程 CSV</span>
+              <span class="smeta">草稿</span>
+              <button class="sdel" type="button" aria-label="刪除討論">
+                ×
+              </button>
+            </div>
+          </li>
+        </ul>
+      </nav>
       <div
+        class="discussion-main"
         style="
           display: grid;
           grid-template-rows: minmax(0, 1fr) auto;
@@ -1909,6 +2241,15 @@
           <div class="box">還想調整什麼就直接說，或按右邊開始執行</div>
         </div>
       </div>
+
+      <div
+        class="resizer split-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="調整討論與草稿寬度"
+        data-resize-pane="pane-chat"
+        data-resize-var="--draft-width"
+      ></div>
 
       <aside class="draft">
         <div class="dh">
@@ -1984,75 +2325,28 @@
 
       <div class="sheet">
         <h2>clinic-web</h2>
-        <p class="lede">
-          測試階段跑的是專案自己的
-          <span class="mono">package.json</span> script，loom 挑
-          <span class="mono">typecheck</span>、<span class="mono">test</span
-          >、<span class="mono">e2e</span>，不必為 loom
-          另外加東西。改了那邊這裡自動跟上。
-        </p>
 
         <div class="field">
           <span class="label">專案路徑</span
-          ><span class="in">~/workspaces/clinic-web</span>
+          ><span class="in ro mono">~/workspaces/clinic-web</span>
         </div>
         <div class="field">
-          <span class="label">主分支</span><span class="in">main</span>
-        </div>
-
-        <div class="grp">
-          <div class="grphd">
-            <span class="label">專案指令</span>
-            <span
-              style="font-size: 11.5px; color: var(--muted); margin-left: auto"
-              >package.json</span
-            >
-          </div>
-          <div class="field">
-            <span class="label">dev</span><span class="in ro">vite</span>
-          </div>
-          <div class="field">
-            <span class="label">typecheck</span
-            ><span class="in ro">tsc --noEmit</span>
-          </div>
-          <div class="field">
-            <span class="label">test</span><span class="in ro">vitest run</span>
-          </div>
-          <div class="field">
-            <span class="label">test:e2e</span
-            ><span class="in ro">playwright test</span>
-          </div>
-          <div class="field">
-            <span class="label">安裝</span
-            ><span class="in ro">pnpm install --frozen-lockfile</span>
-          </div>
-          <div class="field">
-            <span class="label">測試階段會跑</span
-            ><span class="in ro" style="color: var(--ok)"
-              >typecheck、test、test:e2e</span
-            >
-          </div>
-        </div>
-
-        <div class="grp">
-          <div class="grphd"><span class="label">限制</span></div>
-          <div class="field">
-            <span class="label">同時執行的 parent issue</span
-            ><span class="in">2</span>
-          </div>
-          <div class="field">
-            <span class="label">連線埠範圍</span
-            ><span class="in">4300 – 4399</span>
+          <span class="label">主分支</span>
+          <div class="ac">
+            <input
+              class="in mono"
+              type="text"
+              id="settings-branch"
+              value="main"
+              autocomplete="off"
+            />
+            <ul class="ac-list" id="settings-branch-list" hidden></ul>
           </div>
         </div>
 
         <div class="grp">
           <div class="grphd">
             <span class="label">提示詞</span>
-            <span
-              style="font-size: 11.5px; color: var(--muted); margin-left: auto"
-              >loom 內建預設，可依 workspace 覆寫</span
-            >
           </div>
 
           <div class="proles">
@@ -2063,19 +2357,32 @@
             <button class="prole" type="button">parent issue reviewer</button>
             <button class="prole" type="button">chat</button>
           </div>
+          <div class="provcfg">
+            <span class="label">CLI</span>
+            <select class="in mono" id="role-cli">
+              <option selected>claude code</option>
+            </select>
+            <span class="label">model</span>
+            <select class="in mono" id="role-model">
+              <option>opus</option>
+              <option selected>sonnet</option>
+              <option>haiku</option>
+            </select>
+          </div>
 
-          <pre class="ptext"><b># Test-Driven Development</b>
+          <textarea class="ptext" spellcheck="false">
+# Test-Driven Development
 
 TDD is the red → green loop. Tests verify behavior through
 public interfaces, not implementation details.
 
-A <b>seam</b> is the public boundary you test at. Tests live at
+A seam is the public boundary you test at. Tests live at
 seams, never against internals. The seams for this work are
 already agreed in the parent issue's Testing Decisions below — work
 at those, do not introduce new ones.
 
-Work in <b>vertical slices</b>: one test → one implementation →
-repeat, each test a <b>tracer bullet</b>.
+Work in vertical slices: one test → one implementation →
+repeat, each test a tracer bullet.
 
 ... 省略 40 行 ...
 
@@ -2084,21 +2391,61 @@ repeat, each test a <b>tracer bullet</b>.
 
 &lt;parent_issue&gt;{parent_md}&lt;/parent_issue&gt;
 &lt;child_issue&gt;{child_md}&lt;/child_issue&gt;
-&lt;上一輪失敗&gt;{last_failure}&lt;/上一輪失敗&gt;</pre>
+&lt;上一輪失敗&gt;{last_failure}&lt;/上一輪失敗&gt;</textarea>
+        </div>
 
-          <p class="pvars">
-            可用變數 {parent_md} {child_md} {last_failure} {base_sha} {attempt}
-            {port}
-          </p>
-
-          <div class="pfoot">
-            <span class="lock"
-              >輸出 schema 唯讀 · {done, summary, files_changed[]}</span
-            >
-            <button class="btn" type="button">還原預設</button>
-          </div>
+        <div class="sfoot">
+          <span class="sfoot-dirty" id="sfoot-dirty" hidden
+            ><i class="dot"></i>未儲存</span
+          >
+          <span class="sfoot-msg" id="sfoot-msg" hidden>已儲存</span>
+          <button class="btn primary" type="button" id="save-settings" disabled>
+            儲存
+          </button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新增專案 modal -->
+<div class="modal-overlay" id="add-project" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="新增專案">
+    <div class="mhead">
+      <h2>新增專案</h2>
+      <button class="btn" type="button" data-close>取消</button>
+    </div>
+    <div class="mbody">
+      <p class="mnote">輸入專案的本地路徑，名稱會從路徑最後一段自動帶入。</p>
+      <div class="field">
+        <span class="label">專案路徑</span>
+        <div class="ac">
+          <input class="in mono" type="text" id="ap-path" autocomplete="off" />
+          <ul class="ac-list" id="ap-path-list" hidden></ul>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">專案名稱</span>
+        <input class="in mono" type="text" id="ap-name" autocomplete="off" />
+      </div>
+      <div class="field">
+        <span class="label">主要分支</span>
+        <div class="ac">
+          <input
+            class="in mono"
+            type="text"
+            id="ap-branch"
+            value="main"
+            autocomplete="off"
+          />
+          <ul class="ac-list" id="ap-branch-list" hidden></ul>
+        </div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn primary" type="button" id="ap-create-btn" disabled>
+        建立專案
+      </button>
     </div>
   </div>
 </div>
@@ -2108,6 +2455,10 @@ repeat, each test a <b>tracer bullet</b>.
   const panes = document.querySelectorAll(".pane");
   tabs.forEach(function (tab) {
     tab.addEventListener("click", function () {
+      const leavingSettings =
+        document.getElementById("pane-settings").classList.contains("on") &&
+        tab.dataset.pane !== "settings";
+      if (leavingSettings && !guardLeaveSettings()) return;
       tabs.forEach(function (t) {
         t.setAttribute("aria-selected", String(t === tab));
       });
@@ -2115,6 +2466,388 @@ repeat, each test a <b>tracer bullet</b>.
         p.classList.toggle("on", p.id === "pane-" + tab.dataset.pane);
       });
     });
+  });
+
+  const root = document.documentElement;
+  const topbar = document.querySelector(".topbar");
+  const topResizer = document.querySelector(".top-resizer");
+  const splitResizers = document.querySelectorAll(".split-resizer");
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function setAttentionHeight(value) {
+    root.style.setProperty("--attention-height", value + "px");
+  }
+
+  function setPaneSideWidth(property, value) {
+    root.style.setProperty(property, value + "px");
+  }
+
+  function startTopResize(e) {
+    e.preventDefault();
+    topResizer.classList.add("dragging");
+    topResizer.setPointerCapture(e.pointerId);
+    function move(ev) {
+      const topbarBottom = topbar.getBoundingClientRect().bottom;
+      const max = window.innerHeight - topbarBottom - 260;
+      setAttentionHeight(clamp(Math.round(ev.clientY - topbarBottom), 48, max));
+    }
+    function stop() {
+      topResizer.classList.remove("dragging");
+      topResizer.removeEventListener("pointermove", move);
+      topResizer.removeEventListener("pointerup", stop);
+      topResizer.removeEventListener("pointercancel", stop);
+    }
+    topResizer.addEventListener("pointermove", move);
+    topResizer.addEventListener("pointerup", stop);
+    topResizer.addEventListener("pointercancel", stop);
+  }
+
+  function startSplitResize(e) {
+    const resizer = e.currentTarget;
+    const pane = document.getElementById(resizer.dataset.resizePane);
+    const property = resizer.dataset.resizeVar;
+    e.preventDefault();
+    resizer.classList.add("dragging");
+    resizer.setPointerCapture(e.pointerId);
+    function move(ev) {
+      const rect = pane.getBoundingClientRect();
+      const max = rect.width - 326;
+      setPaneSideWidth(
+        property,
+        clamp(Math.round(rect.right - ev.clientX), 260, max),
+      );
+    }
+    function stop() {
+      resizer.classList.remove("dragging");
+      resizer.removeEventListener("pointermove", move);
+      resizer.removeEventListener("pointerup", stop);
+      resizer.removeEventListener("pointercancel", stop);
+    }
+    resizer.addEventListener("pointermove", move);
+    resizer.addEventListener("pointerup", stop);
+    resizer.addEventListener("pointercancel", stop);
+  }
+
+  topResizer.addEventListener("pointerdown", startTopResize);
+  splitResizers.forEach(function (resizer) {
+    resizer.addEventListener("pointerdown", startSplitResize);
+  });
+
+  // 設定頁：角色選擇器切換，連動該角色的 CLI／model
+  const proles = document.querySelectorAll(".prole");
+  const roleCli = document.getElementById("role-cli");
+  const roleModel = document.getElementById("role-model");
+  const ROLE_CFG = {
+    coder: { cli: "claude code", model: "sonnet" },
+    "issue reviewer": { cli: "claude code", model: "sonnet" },
+    "parent issue reviewer": { cli: "claude code", model: "opus" },
+    chat: { cli: "claude code", model: "sonnet" },
+  };
+
+  function currentRoleName() {
+    const on = document.querySelector('.prole[aria-current="true"]');
+    return on ? on.textContent.trim() : "coder";
+  }
+
+  function loadRoleCfg() {
+    const cfg = ROLE_CFG[currentRoleName()] || ROLE_CFG.coder;
+    roleCli.value = cfg.cli;
+    roleModel.value = cfg.model;
+  }
+
+  proles.forEach(function (prole) {
+    prole.addEventListener("click", function () {
+      proles.forEach(function (p) {
+        p.setAttribute("aria-current", String(p === prole));
+      });
+      loadRoleCfg();
+    });
+  });
+
+  roleCli.addEventListener("change", function () {
+    ROLE_CFG[currentRoleName()].cli = roleCli.value;
+  });
+  roleModel.addEventListener("change", function () {
+    ROLE_CFG[currentRoleName()].model = roleModel.value;
+  });
+
+  loadRoleCfg();
+
+  // 設定頁：未儲存追蹤與儲存
+  const saveBtn = document.getElementById("save-settings");
+  const sfootMsg = document.getElementById("sfoot-msg");
+  const sfootDirty = document.getElementById("sfoot-dirty");
+  const settingsBranch = document.getElementById("settings-branch");
+  const promptText = document.querySelector(".ptext");
+  let settingsDirty = false;
+
+  function setSettingsDirty(value) {
+    settingsDirty = value;
+    sfootDirty.hidden = !value;
+    saveBtn.disabled = !value;
+  }
+  function markDirty() {
+    setSettingsDirty(true);
+  }
+  function guardLeaveSettings() {
+    if (!settingsDirty) return true;
+    if (confirm("有未儲存的變更，要捨棄嗎？")) {
+      setSettingsDirty(false);
+      return true;
+    }
+    return false;
+  }
+
+  settingsBranch.addEventListener("input", markDirty);
+  roleCli.addEventListener("change", markDirty);
+  roleModel.addEventListener("change", markDirty);
+  if (promptText) promptText.addEventListener("input", markDirty);
+
+  saveBtn.addEventListener("click", function () {
+    setSettingsDirty(false);
+    sfootMsg.hidden = false;
+    setTimeout(function () {
+      sfootMsg.hidden = true;
+    }, 1800);
+  });
+
+  // 設定頁：新增專案 modal 流程
+  const addProjectOverlay = document.getElementById("add-project");
+  const addProjectBtn = document.querySelector(".wsrail .add .btn");
+  const apPath = document.getElementById("ap-path");
+  const apName = document.getElementById("ap-name");
+  const apBranch = document.getElementById("ap-branch");
+  const apCreateBtn = document.getElementById("ap-create-btn");
+  const wsrailList = document.querySelector(".wsrail ul");
+
+  // 自動顯示清單：模擬偵測到的 workspace 路徑與常見分支
+  const PATH_OPTIONS = [
+    "~/workspaces/patient-portal",
+    "~/workspaces/billing-service",
+    "~/workspaces/appointment-api",
+    "~/workspaces/notifications-svc",
+    "~/workspaces/inventory-tracker",
+    "~/workspaces/lab-results-ui",
+    "~/workspaces/sms-gateway",
+  ];
+  const BRANCH_OPTIONS = ["main", "master", "develop", "trunk", "dev"];
+
+  function setupAutocomplete(input, listEl, options) {
+    function render(q) {
+      const lower = q.trim().toLowerCase();
+      const matches = lower
+        ? options.filter(function (o) {
+            return o.toLowerCase().includes(lower);
+          })
+        : options.slice();
+      while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+      if (matches.length === 0) {
+        const li = document.createElement("li");
+        li.className = "ac-empty";
+        li.textContent = "沒有符合的項目";
+        listEl.appendChild(li);
+      } else {
+        matches.forEach(function (m) {
+          const li = document.createElement("li");
+          li.textContent = m;
+          li.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            input.value = m;
+            listEl.hidden = true;
+            input.dispatchEvent(new Event("input"));
+            input.focus();
+          });
+          listEl.appendChild(li);
+        });
+      }
+      listEl.hidden = false;
+    }
+    input.addEventListener("input", function () {
+      render(input.value);
+    });
+    input.addEventListener("click", function () {
+      render(input.value);
+    });
+    input.addEventListener("blur", function () {
+      setTimeout(function () {
+        listEl.hidden = true;
+      }, 120);
+    });
+  }
+
+  setupAutocomplete(
+    apPath,
+    document.getElementById("ap-path-list"),
+    PATH_OPTIONS,
+  );
+  setupAutocomplete(
+    apBranch,
+    document.getElementById("ap-branch-list"),
+    BRANCH_OPTIONS,
+  );
+  setupAutocomplete(
+    document.getElementById("settings-branch"),
+    document.getElementById("settings-branch-list"),
+    BRANCH_OPTIONS,
+  );
+
+  function selectWsItem(btn) {
+    const current = document.querySelector(
+      '.wsrail .item[aria-current="true"]',
+    );
+    if (current === btn) return;
+    if (!guardLeaveSettings()) return;
+    document.querySelectorAll(".wsrail .item").forEach(function (it) {
+      it.setAttribute("aria-current", String(it === btn));
+    });
+  }
+
+  document.querySelectorAll(".wsrail .item").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      selectWsItem(btn);
+    });
+  });
+
+  function openAddProject() {
+    apPath.value = "";
+    apName.value = "";
+    apBranch.value = "main";
+    apCreateBtn.disabled = true;
+    addProjectOverlay.hidden = false;
+  }
+
+  function closeAddProject() {
+    addProjectOverlay.hidden = true;
+  }
+
+  function projectNameFromPath(path) {
+    const trimmed = path.replace(/[\/]+$/, "");
+    const seg = trimmed.split(/[\\/]/).pop();
+    return seg || trimmed;
+  }
+
+  addProjectBtn.addEventListener("click", openAddProject);
+
+  addProjectOverlay.addEventListener("click", function (e) {
+    if (e.target === addProjectOverlay) closeAddProject();
+  });
+
+  addProjectOverlay.querySelectorAll("[data-close]").forEach(function (btn) {
+    btn.addEventListener("click", closeAddProject);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !addProjectOverlay.hidden) closeAddProject();
+  });
+
+  apPath.addEventListener("input", function () {
+    const path = apPath.value.trim();
+    apName.value = path ? projectNameFromPath(path) : "";
+    apCreateBtn.disabled = path.length === 0;
+  });
+
+  apPath.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !apCreateBtn.disabled) {
+      e.preventDefault();
+      apCreateBtn.click();
+    }
+  });
+
+  apCreateBtn.addEventListener("click", function () {
+    const path = apPath.value.trim();
+    if (!path) return;
+    const name = apName.value.trim() || projectNameFromPath(path);
+    const branch = apBranch.value.trim() || "main";
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.className = "item";
+    btn.type = "button";
+    btn.textContent = name;
+    const span = document.createElement("span");
+    span.className = "path";
+    span.textContent = path;
+    btn.appendChild(span);
+    btn.dataset.branch = branch;
+    btn.addEventListener("click", function () {
+      selectWsItem(btn);
+    });
+    li.appendChild(btn);
+    wsrailList.appendChild(li);
+    btn.click();
+    closeAddProject();
+  });
+
+  // 討論分頁：session 清單切換、新增、刪除
+  const sessionList = document.getElementById("session-list");
+  const newSessionBtn = document.getElementById("new-session");
+  let sessionSeq = 0;
+
+  function selectSession(item) {
+    if (!item) return;
+    sessionList.querySelectorAll(".sitem").forEach(function (it) {
+      it.setAttribute("aria-current", String(it === item));
+    });
+  }
+
+  function deleteSession(item) {
+    const li = item.closest("li");
+    const wasCurrent = item.getAttribute("aria-current") === "true";
+    li.remove();
+    if (wasCurrent) {
+      selectSession(sessionList.querySelector(".sitem"));
+    }
+  }
+
+  function bindSession(item) {
+    item.addEventListener("click", function (e) {
+      if (e.target.closest(".sdel")) return;
+      selectSession(item);
+    });
+    item.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectSession(item);
+      }
+    });
+    const del = item.querySelector(".sdel");
+    if (del) {
+      del.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deleteSession(item);
+      });
+    }
+  }
+
+  sessionList.querySelectorAll(".sitem").forEach(bindSession);
+
+  newSessionBtn.addEventListener("click", function () {
+    sessionSeq += 1;
+    const li = document.createElement("li");
+    const item = document.createElement("div");
+    item.className = "sitem";
+    item.setAttribute("role", "button");
+    item.setAttribute("tabindex", "0");
+    const title = document.createElement("span");
+    title.className = "stitle";
+    title.textContent = "新討論 " + sessionSeq;
+    const meta = document.createElement("span");
+    meta.className = "smeta";
+    meta.textContent = "草稿";
+    const del = document.createElement("button");
+    del.className = "sdel";
+    del.type = "button";
+    del.setAttribute("aria-label", "刪除討論");
+    del.textContent = "×";
+    item.appendChild(title);
+    item.appendChild(meta);
+    item.appendChild(del);
+    li.appendChild(item);
+    sessionList.appendChild(li);
+    bindSession(item);
+    selectSession(item);
   });
 
   // 右側面板在「選中的 issue」與「選中的 spec」兩種內容之間切換
@@ -2202,8 +2935,27 @@ repeat, each test a <b>tracer bullet</b>.
   }
 
   lanes.forEach(function (lane) {
+    const chev = document.createElement("span");
+    chev.className = "chev";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "▼";
+    lane.insertBefore(chev, lane.firstChild);
+  });
+
+  function setLaneFold(lane, folded) {
+    lane.classList.toggle("folded", folded);
+    applyProjectFilter();
+  }
+
+  lanes.forEach(function (lane) {
     lane.addEventListener("click", function () {
+      const wasSelected = lane.classList.contains("on");
       showSpec(lane);
+      if (wasSelected) {
+        setLaneFold(lane, !lane.classList.contains("folded"));
+      } else {
+        setLaneFold(lane, false);
+      }
     });
   });
 
@@ -2229,70 +2981,12 @@ repeat, each test a <b>tracer bullet</b>.
     const out = [];
     let sib = lane.nextElementSibling;
     let i = 0;
-    while (sib && i < 5) {
+    while (sib && i < 4) {
       out.push(sib);
       sib = sib.nextElementSibling;
       i++;
     }
     return out;
-  }
-
-  // 草稿／已合併 fold 也是 per-workspace 的 parent issue，跟著篩選重算計數與名稱。
-  const FOLD_ITEMS = {
-    draft: [
-      { name: "patient-search-filters", project: "clinic-web" },
-      { name: "export-schedule-csv", project: "clinic-web" },
-      { name: "notification-digest", project: "booking-widget" },
-    ],
-    merged: [
-      { name: "slot-conflict-warning", project: "clinic-web" },
-      { name: "staff-colour-legend", project: "clinic-web" },
-      { name: "week-strip-keyboard-nav", project: "clinic-web" },
-      { name: "appointment-status-chips", project: "booking-widget" },
-      { name: "timezone-display", project: "clinic-admin" },
-      { name: "patient-card-redesign", project: "clinic-web" },
-      { name: "booking-confirmation-flow", project: "booking-widget" },
-      { name: "admin-role-permissions", project: "clinic-admin" },
-      { name: "inventory-reorder-alerts", project: "clinic-web" },
-      { name: "invoice-pdf-export", project: "booking-widget" },
-      { name: "staff-shift-templates", project: "clinic-admin" },
-      { name: "calendar-ics-export", project: "clinic-web" },
-    ],
-  };
-
-  function renderFolds(active) {
-    document.querySelectorAll(".fold").forEach(function (fold) {
-      const kind = fold.dataset.foldKind;
-      const items = (FOLD_ITEMS[kind] || []).filter(function (it) {
-        return active.has(it.project);
-      });
-      if (items.length === 0) {
-        fold.hidden = true;
-        return;
-      }
-      fold.hidden = false;
-      while (fold.firstChild) fold.removeChild(fold.firstChild);
-      const shown = items.slice(0, 5);
-      const rest = items.length - shown.length;
-      const tw = document.createElement("span");
-      tw.className = "tw";
-      tw.setAttribute("aria-hidden", "true");
-      tw.textContent = "▶";
-      const ttl = document.createElement("span");
-      ttl.className = "ttl";
-      ttl.textContent = (kind === "draft" ? "草稿 " : "已合併 ") + items.length;
-      const names = document.createElement("span");
-      names.className = "names";
-      names.textContent =
-        shown
-          .map(function (it) {
-            return it.name;
-          })
-          .join(" · ") + (rest > 0 ? " · 還有 " + rest + " 個" : "");
-      fold.appendChild(tw);
-      fold.appendChild(ttl);
-      fold.appendChild(names);
-    });
   }
 
   function applyProjectFilter() {
@@ -2305,9 +2999,10 @@ repeat, each test a <b>tracer bullet</b>.
     let visible = 0;
     boardLanes.forEach(function (lane) {
       const show = active.has(lane.dataset.project);
+      const folded = lane.classList.contains("folded");
       lane.hidden = !show;
       laneCells(lane).forEach(function (cell) {
-        cell.hidden = !show;
+        cell.hidden = !show || folded;
       });
       if (show) visible++;
     });
@@ -2316,7 +3011,6 @@ repeat, each test a <b>tracer bullet</b>.
       c.hidden = empty;
     });
     if (bempty) bempty.hidden = !empty;
-    renderFolds(active);
   }
 
   fchips.forEach(function (chip) {

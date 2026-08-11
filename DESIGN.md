@@ -8,6 +8,15 @@
 
 無人值守是核心目標：晚上啟動一個 parent issue，隔天早上看結果。所有設計取捨在「減少人工介入次數」與「其他考量」衝突時，優先前者。
 
+## 設計公設
+
+loom 的設計從這幾條設計公設推導出來，規則與狀態機都該回得到這裡。
+
+1. **issue 可以有子 issue。** parent 的狀態由 child 聯合決定，child 是實際被執行的單元。深度固定兩層。
+2. **issue 在實作中只能往前。** 失敗不退回同一個 issue 重做，而是讓它進終端、由新 issue 接手。
+
+> **公設 2 尚未落實到狀態機。** 現有 `reviewing[*] ──fail──▶ implementing` 這條回頭邊與它牴觸（testing 已降為 `reviewing` 裡的 `test_verification` phase，所以主狀態只剩一條回頭邊）。待決策：失敗終端的命名與是否連坐下游、自動開補丁 child 的終止上限、適用範圍（人為恢復／崩潰重啟是否算倒退）、每次失敗開新 child 的成本。定案後連帶改寫狀態機與「domain 重試策略」。
+
 ## 核心概念
 
 | 概念 | 定義 |
@@ -20,6 +29,76 @@
 模型是單一 issue 實體加一層 parent/child，不是兩種不同的東西。**深度固定兩層**：parent 有 child、child 是葉。schema 用 `parent_id` 表達這層關係，但不允許再往下底狀（要更深的結構就拆成獨立的 parent issue、用 `blocked_by` 連，見「Blocked by」）。
 
 parent issue 在結構上提供四件事：agent 的 prompt context、衝突域宣告（同 parent 的 child issue 序列執行）、kanban swimlane、merge 單位。同一個 parent issue 的檔案固定放在 `<repo>/.loom/issues/<parent-slug>/`，parent 的描述與各 child issue 都在裡面；位置固定、不可設，理由同舊設計的 `.loom/specs`。
+
+## 準則清單
+
+散在各節的結構與流程規則，開發時照這份查；理由與細節在對應小節。**這份是指引索引，不是規格本身——有衝突時以各節內文為準。**
+
+### 結構
+
+- issue 是單一實體，parent/child 兩種角色，**深度固定兩層**（child 是葉）。要更深就拆成獨立 parent 用 `blocked_by` 連。
+- parent issue 提供：prompt context、衝突域、kanban swimlane、merge 單位；一條 `issue/<name>` 分支、一個 worktree。
+- 檔案固定放 `<repo>/.loom/issues/<parent-slug>/`，位置不可設。
+- parent 狀態**一律由 child 聚合算出**，狀態檔只有 `merged` 與 `blocked_reason`（child 推不出來的事實）。不做兩層狀態同步。
+
+### 狀態機
+
+- child 9 狀態；`done`／`dropped` 是終端。
+- 主狀態對應看板四欄：`ready`、`implementing`、`reviewing`、`done`。
+- `reviewing` 內部分兩個 phase：`llm_review` → `test_verification`；phase 只影響 badge，不是看板欄位。
+- 線性前進：`implementing → reviewing → done`。`reviewing` 內任一 phase 失敗退回 `implementing`。
+- 重試上限／error → `blocked` → 人處理 → `ready`；`blocked → dropped` 連坐下游未開工 child。
+- `human` 不派工。
+- parent 聚合用 first-match 表（blocked 與執行中可同時成立）。
+
+### 派工與執行
+
+- orchestrator 持有狀態、**push 派工**；不是 coder 呼下一棒、不是 agent 輪詢。
+- orchestrator 的決策一律確定性，**不用 LLM 做流程判斷**。
+- 同 parent 的 child 依編號序列執行，**不平行**（一個 parent 一個 worktree）。
+- 跨 parent 平行，上限 per-workspace（預設 2）。
+- `Blocked by` 只用來**止血／排序**，不用來平行化同 parent 的 child。
+
+### git
+
+- **coder 不自己 commit**，orchestrator 代 commit；diff 為空送 reviewer 判定。
+- 每個 child 完成後 rebase parent branch 到最新 main；衝突寫 `blocked_reason: rebase_conflict`。
+- 清理一律**三段式**：`rebase --abort || true` → `reset --hard <base_sha>` → `clean -fd`。
+- merge 粒度：parent 全綠才一次 merge 回 main，**人工觸發**。
+- merge 時先 rebase；帶進**非 issues 路徑**的 commit 才退回 verifying 重驗（排除 loom 自己的狀態 commit）。
+- 只有 orchestrator 在 main checkout 寫 issues front matter；agent worktree 不碰 `.loom/issues`。
+- parent merged 後回收 worktree、刪 branch。
+
+### agent 邊界
+
+- 四個 LLM 角色：chat、coder、issue reviewer、parent issue reviewer。**沒有 tester**（`reviewing.test_verification` 裡的測試由 orchestrator subprocess 跑，不是 LLM）。
+- coder 不重新規劃 parent、不在無人值守階段加需求；只完成當前 child。
+- coder 禁碰 `.loom/`（保護 orchestrator 狀態）。
+- chat 禁改任何檔案（`--disallowedTools Write Edit`）。
+- reviewer 只讀 diff、不寫檔、context 乾淨（不看 coder 辯解），同時判定測試品質。
+- 專案背景進 agent 的唯一管道是 `.loom/context.md`，**只讀不寫**，讀主 checkout 版本。
+
+### 驗證
+
+- 每個 child：coder 在 `implementing` 結尾自跑 typecheck／unit；review 通過後，orchestrator 在 `reviewing.test_verification` 重跑 typecheck／unit；`e2e: true` 的 child 多跑 e2e。
+- parent 所有 child done 後：完整 e2e + parent issue review，過了才 mergeable（七個綠燈疊起來未必綠）。
+- e2e 紅**先原地重跑一次**，兩次都紅才算 domain fail；unit test 不需這層。
+- 測試由 orchestrator 跑（process group、逾時整組收掉），**不由 LLM 跑**；typecheck 先跑。
+- 沒有可跑 script → `pass:true` 但標警告；worktree 不存在 → 拋錯停排程器。
+
+### 失敗與重試
+
+- **infra 與 domain 兩個獨立計數器**。
+- 重試前提是「再跑可能不同」：API error 成立；超時、git 衝突不成立，直接 blocked。
+- domain 第三次：三段式清理退回 base_sha 從乾淨狀態重寫，帶前兩次失敗紀錄。
+- 用量視窗用盡：**暫停整個 orchestrator**，不動 issue 狀態；看板有手動暫停／恢復開關。
+- 崩潰恢復順序不能顛倒：先對未 merged parent worktree 一致性檢查（rebase 中途／髒工作區），再依狀態處理——`implementing` 回捲，`review*`／`test*` **不動 code** 重派。
+
+### 來源過期與自動收斂
+
+- `source_hash` 只對 done 有意義，是 derived boolean、**不是狀態**、不擋 merge。
+- 整體 e2e 紅自動開 child：同一 parent **累計 2 次上限**，第 3 次標 `blocked_reason: e2e_loop` 等人看。
+- parent issue review 意見**不自動開 child**，只掛在 mergeable parent 給人看（架構意見是人的判斷）。
 
 ## 提示詞
 
@@ -52,26 +131,36 @@ chat 的提示詞要產出 parent issue 的問題、目標、限制、測試指�
 
 ## 狀態機
 
-狀態機有兩個層次，都作用在 issue 上：child issue 帶自己的 11 狀態機，parent issue 的狀態由它的 child 聯合算出。
+狀態機有兩個層次，都作用在 issue 上：child issue 帶自己的 9 狀態機，parent issue 的狀態由它的 child 聯合算出。
+
+主狀態就是看板上的位置。testing 不再是主狀態，也不再是看板欄位；測試驗證是 `reviewing` 裡的 phase，用 badge 呈現。
+
+| 看板欄位 | child 主狀態 |
+| --- | --- |
+| 待處理 | `ready` |
+| 實作中 | `implementing` |
+| 審查中 | `review_ready`、`reviewing` |
+| 完成 | `done` |
 
 ### child issue 的狀態機
 
 ```
 draft ──finalize──▶ ready
 ready ──派工──▶ implementing
-implementing ──ok──▶ review_ready ──派工──▶ reviewing
-  reviewing ──pass──▶ test_ready ──▶ testing
-  reviewing ──reject──▶ implementing
-  testing ──pass──▶ done
-  testing ──fail / build fail──▶ implementing
-中間狀態（implementing / review_ready / reviewing / test_ready / testing）
+implementing ──ok / self-check pass──▶ review_ready ──派工──▶ reviewing[llm_review]
+  reviewing[llm_review] ──pass──▶ reviewing[test_verification]
+  reviewing[test_verification] ──pass──▶ done
+  reviewing[*] ──reject / test fail / build fail──▶ implementing
+中間狀態（implementing / review_ready / reviewing）
   ──error 或超過重試上限──▶ blocked ──人工──▶ ready
 blocked ──人按「先收目前進度」──▶ dropped
 human ──人做完手動標──▶ done
 human ──人改主意──▶ ready
 ```
 
-十一個狀態。`done` 與 `dropped` 是終端狀態，聚合時都算「不必再做」。
+九個狀態。`done` 與 `dropped` 是終端狀態，聚合時都算「不必再做」。
+
+**`reviewing` 不是單一動作，而是同一欄位裡的兩個 phase。** 先由 reviewer 看 diff；review 通過後，同一張卡仍留在「審查中」欄，phase 變成 `test_verification`，顯示「驗證中」badge，由 orchestrator 重跑 typecheck／unit（必要時 e2e）。兩個 phase 都過才進 `done`；任一失敗就退回 `implementing`。testing 不是主狀態，只是 `reviewing` 裡的驗證 phase。
 
 `draft` 只用於人手寫丟進 issues 資料夾的 child issue（見「人手寫的 parent issue」）。chat 定稿產出的 child issue 直接進 `ready` 或 `human`。
 
@@ -109,7 +198,7 @@ git 操作失敗 ──▶ parent 層 blocked（寫 blocked_reason）──人�
 | 2 | parent blocked | 狀態檔的 `blocked_reason` 非空 |
 | 3 | blocked | 任一 child 是 `blocked` |
 | 4 | 等人動手 | 下一個該做的 child 是 `human` |
-| 5 | 執行中 | 任一 child 在 implementing、review_ready、reviewing、test_ready、testing |
+| 5 | 執行中 | 任一 child 在 implementing、review_ready、reviewing |
 | 6 | verifying / mergeable | 所有 child 到達終端，再看 DB 裡整體 e2e 與 parent issue review 的結果 |
 | 7 | 排隊中 | 至少一個 `ready`，且沒有任何 child 在中間狀態 |
 | 8 | 草稿 | 全部 `draft` |
@@ -118,7 +207,7 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 
 第 7 列的述詞是「至少一個 ready」而不是「全部 ready」，因為 done 與 ready 混合是設計自己製造的常態：parent issue review 意見轉成 child、整體 e2e 紅開新 child，兩條路徑都往全 done 的 parent 加一個 ready。
 
-**中間狀態一律用列舉，不用 `*ing` 字面。** `review_ready` 與 `test_ready` 是有自己派工轉移的持久狀態，字面上不含 ing，用萬用字元寫會漏掉它們 -- orchestrator 因用量視窗暫停時整批狀態會凍在那裡。崩潰恢復的掃描用同一份列舉。
+**中間狀態一律用列舉，不用 `*ing` 字面。** `review_ready` 是有自己派工轉移的持久狀態，字面上不含 ing，用萬用字元寫會漏掉它 -- orchestrator 因用量視窗暫停時整批狀態會凍在那裡。崩潰恢復的掃描用同一份列舉。
 
 整體 e2e 失敗產生的 child issue 由 orchestrator 用模板寫：標題是失敗的測試名稱，body 是 tail 輸出，**並且一律帶 `e2e: true`**。沒有這個旗標的話，這個為了修 e2e 而生的 child 只會被 typecheck、unit test、review 驗證，coder 交出看起來合理但沒真正修好的改動就能通過，回到 verifying 又紅，再開一個新 child，每個新 child 帶全新的重試計數，永遠不收斂。
 
@@ -338,10 +427,9 @@ orchestrator 重啟後做兩件事，順序不能顛倒。
 | 卡住的狀態 | 處理 |
 | --- | --- |
 | implementing | 三段式清理退回 base_sha，回 `ready`，不計重試 |
-| review_ready、reviewing | 退回 `review_ready` 重派一次 reviewer，**不動 code** |
-| test_ready、testing | 退回 `test_ready` 重跑一次測試，**不動 code** |
+| review_ready、reviewing | 退回 `review_ready` 重派 reviewer 並重跑測試，**不動 code** |
 
-一律回捲是錯的：reviewer 只讀 diff 不寫檔，testing 的執行者是 orchestrator 的 subprocess 不是 LLM，兩者都不會留下「半改而 agent 不知道」的樹。orchestrator 在整體 e2e 期間崩潰是常見情形（e2e 很容易把機器打爆），照一律回捲會把已經通過 review 的 commit 全部丟掉，child 從 ready 重跑一整輪，而且「不計重試次數」代表這次浪費連計數器都不會記住。無人值守整晚時這是白燒一次完整實作。
+一律回捲是錯的：reviewer 只讀 diff 不寫檔，測試的執行者是 orchestrator 的 subprocess 不是 LLM，兩者都不會留下「半改而 agent 不知道」的樹。orchestrator 在整體 e2e 期間崩潰是常見情形（e2e 很容易把機器打爆），照一律回捲會把已經通過 review 的 commit 全部丟掉，child 從 ready 重跑一整輪，而且「不計重試次數」代表這次浪費連計數器都不會記住。無人值守整晚時這是白燒一次完整實作。
 
 implementing 要回捲，因為那是唯一可能死在 tool call 中間、留下半改工作樹的狀態。
 
@@ -374,7 +462,7 @@ reviewer 同時負責判定測試品質：這些測試是在測行為還是在�
 
 ### 沒有 tester agent
 
-`testing` 是一個狀態，但執行者是 orchestrator 的 subprocess，不是 LLM。
+`reviewing` 的 `test_verification` phase 裡的測試由 orchestrator 的 subprocess 跑，不是 LLM；狀態機裡沒有獨立的 testing 狀態。
 
 拆解原本要給 tester 的四項職責：跑測試由 orchestrator 執行指令看 exit code，比 LLM 可靠且免費；測試覆蓋判定由 reviewer 承接，它已經在讀含測試檔的完整 diff；挑相關測試省下的時間比不上 LLM 呼叫的成本，挑錯還會漏測；失敗診斷由 coder 自己做，它在 worktree 裡有 Bash。
 
@@ -388,7 +476,7 @@ reviewer 同時負責判定測試品質：這些測試是在測行為還是在�
 
 分兩層，便宜的檢查密集跑，昂貴的只在該跑時跑。
 
-**每個 child issue**：typecheck、unit test、review。
+**每個 child issue**：coder 在 `implementing` 結尾自跑 typecheck／unit test；進 `reviewing` 後先跑 issue review；review 通過後，orchestrator 在 `test_verification` phase 重跑 typecheck／unit test。
 
 **child front matter 宣告 `e2e: true` 的**：該 child 也跑一次 e2e。
 
@@ -435,9 +523,9 @@ merge 按鈕已經是人的閘門，那些意見正好是按下去之前該讀�
 
 整批做完才驗證的問題不是省時間，是錯誤在序列鏈上會複利：child 03 壞了但在 07 做完才發現，中間四個 child 全建立在壞基礎上。而且 reviewer 讀七個 child 疊起來的 diff，品質會明顯掉。
 
-### 測試階段跑什麼
+### reviewing 裡的 test_verification phase 跑什麼
 
-進入 testing 時：依 lockfile 裝依賴（agent 可能加了新的）、跑 `typecheck`、跑 `test`、必要時跑 `e2e`，每個指令都自成一個 process group，逾時就整組收掉。
+coder 在 `implementing` 結尾已經自跑 typecheck 與 unit test；那是 self-check。child 進 `reviewing` 後先跑 `llm_review` phase。review 通過後才進 `test_verification` phase，由 orchestrator 依 lockfile 裝依賴（agent 可能加了新的）、重跑 `typecheck`、重跑 `test`、必要時跑 `e2e`。每個指令都自成一個 process group，逾時就整組收掉。
 
 **loom 不起 dev server。** 需要 server 的測試由測試指令自己起 -- Playwright 的 `webServer` 就是做這件事，而且它自己負責關掉。loom 起一份的話等於要求專案再宣告一個「給 loom 用的 dev 指令」，還要 loom 去猜每個框架怎麼吃 port，而 e2e 框架早就有這個功能。
 
@@ -666,7 +754,7 @@ parent issue 固定放 `<repo>/.loom/issues/`。人可以直接在底下建 `<pa
 
 **child 檔沒有 front matter 時就地補一份 `status: draft`、`e2e: false`、`blocked_by: []`。** 補寫做在 `loadIssues` 裡，它是所有讀取路徑的共同入口 -- 另開一個 normalize 步驟就得在每個呼叫端記得先跑一次，漏掉一個就是一條會讀到沒有 front matter 的檔案而炸掉的路徑。補上的內容不另外 commit：這條路徑包含唯讀的看板查詢，那份 front matter 由下一次狀態轉移的 `git add` 一併帶走。落點是 draft，所以補完也不會有東西自己跑起來。
 
-**不讀 body 裡的任何欄位。** 早期版本會讀 markdown body 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 的 child 有十一個狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by」），所以那種錯誤會安靜地等到第一次有 child blocked 才發作，且症狀是「該擋的沒擋」。
+**不讀 body 裡的任何欄位。** 早期版本會讀 markdown body 的 `**Status:**` 與 `**Blocked by:**` 行映射成 loom 的狀態，拿掉了。兩邊的值域對不上：那五個 triage 標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）沒有一個表示「已完成」，而 loom 的 child 有九個狀態，映射只在「還沒開工」那一端說得通。`Blocked by` 更糟 -- 實際寫法會帶括號註解（`01(共用純模組，由 01 建立骨架)`），逗號切分產出的是指向不存在 id 的 blocker，而 `blocked_by` 只在 frontier 卡住、止血機制要判斷哪些下游可以頂替時才被讀（見「Blocked by」），所以那種錯誤會安靜地等到第一次有 child blocked 才發作，且症狀是「該擋的沒擋」。
 
 手寫的 child 要宣告依賴就自己寫 front matter 的 `blocked_by`。正常執行照檔名編號序列走，編號排對了空著也能跑。
 
