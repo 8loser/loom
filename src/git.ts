@@ -3,20 +3,20 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+	return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
 function gitOk(cwd: string, args: string[]): boolean {
-  try {
-    execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
+	try {
+		execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function currentHead(cwd: string): string {
-  return git(cwd, ["rev-parse", "HEAD"]);
+	return git(cwd, ["rev-parse", "HEAD"]);
 }
 
 /**
@@ -25,11 +25,13 @@ export function currentHead(cwd: string): string {
  * 選單不該讓整頁掛掉。
  */
 export function listBranches(repoPath: string): string[] {
-  try {
-    return git(repoPath, ["branch", "--format=%(refname:short)"]).split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
+	try {
+		return git(repoPath, ["branch", "--format=%(refname:short)"])
+			.split("\n")
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
 }
 
 /**
@@ -44,37 +46,44 @@ export function listBranches(repoPath: string): string[] {
  * 狀態，照樣生效。同一個 `.loom/` 底下的 specs 不受影響，它在這個目錄外面。
  */
 export function ensureWorktree(
-  repoPath: string,
-  worktreePath: string,
-  specBranch: string,
-  mainBranch: string,
+	repoPath: string,
+	worktreePath: string,
+	specBranch: string,
+	mainBranch: string,
 ): void {
-  const worktreesRoot = dirname(worktreePath);
-  const ignoreFile = join(worktreesRoot, ".gitignore");
-  if (!existsSync(ignoreFile)) {
-    mkdirSync(worktreesRoot, { recursive: true });
-    writeFileSync(ignoreFile, "*\n");
-  }
+	const worktreesRoot = dirname(worktreePath);
+	const ignoreFile = join(worktreesRoot, ".gitignore");
+	if (!existsSync(ignoreFile)) {
+		mkdirSync(worktreesRoot, { recursive: true });
+		writeFileSync(ignoreFile, "*\n");
+	}
 
-  if (existsSync(worktreePath)) return;
+	if (existsSync(worktreePath)) return;
 
-  const branchExists = gitOk(repoPath, [
-    "show-ref",
-    "--verify",
-    "--quiet",
-    `refs/heads/${specBranch}`,
-  ]);
+	const branchExists = gitOk(repoPath, [
+		"show-ref",
+		"--verify",
+		"--quiet",
+		`refs/heads/${specBranch}`,
+	]);
 
-  if (branchExists) {
-    git(repoPath, ["worktree", "add", worktreePath, specBranch]);
-  } else {
-    git(repoPath, ["worktree", "add", "-b", specBranch, worktreePath, mainBranch]);
-  }
+	if (branchExists) {
+		git(repoPath, ["worktree", "add", worktreePath, specBranch]);
+	} else {
+		git(repoPath, [
+			"worktree",
+			"add",
+			"-b",
+			specBranch,
+			worktreePath,
+			mainBranch,
+		]);
+	}
 }
 
 export interface CommitResult {
-  committed: boolean;
-  sha: string;
+	committed: boolean;
+	sha: string;
 }
 
 /**
@@ -83,17 +92,21 @@ export interface CommitResult {
  * 判定」的路徑，不當成錯誤。
  */
 export function commitAll(worktreePath: string, message: string): CommitResult {
-  git(worktreePath, ["add", "-A"]);
-  const dirty = git(worktreePath, ["status", "--porcelain"]);
-  if (dirty === "") {
-    return { committed: false, sha: currentHead(worktreePath) };
-  }
-  git(worktreePath, ["commit", "-m", message]);
-  return { committed: true, sha: currentHead(worktreePath) };
+	git(worktreePath, ["add", "-A"]);
+	const dirty = git(worktreePath, ["status", "--porcelain"]);
+	if (dirty === "") {
+		return { committed: false, sha: currentHead(worktreePath) };
+	}
+	git(worktreePath, ["commit", "-m", message]);
+	return { committed: true, sha: currentHead(worktreePath) };
 }
 
-export function diffRange(worktreePath: string, baseSha: string, toRef = "HEAD"): string {
-  return git(worktreePath, ["diff", `${baseSha}..${toRef}`]);
+export function diffRange(
+	worktreePath: string,
+	baseSha: string,
+	toRef = "HEAD",
+): string {
+	return git(worktreePath, ["diff", `${baseSha}..${toRef}`]);
 }
 
 /**
@@ -117,73 +130,97 @@ export function diffRange(worktreePath: string, baseSha: string, toRef = "HEAD")
  *    monorepo 的 packages/x/dist。
  */
 const REVIEW_EXCLUDED = [
-  ":(exclude)package-lock.json",
-  ":(exclude)pnpm-lock.yaml",
-  ":(exclude)yarn.lock",
-  ":(exclude)bun.lockb",
-  ":(exclude)*.snap",
-  ":(exclude)*.generated.*",
-  ":(exclude)dist/*",
-  ":(exclude)*/dist/*",
-  ":(exclude)build/*",
-  ":(exclude)*/build/*",
-  ":(exclude)__snapshots__/*",
-  ":(exclude)*/__snapshots__/*",
+	":(exclude)package-lock.json",
+	":(exclude)pnpm-lock.yaml",
+	":(exclude)yarn.lock",
+	":(exclude)bun.lockb",
+	":(exclude)*.snap",
+	":(exclude)*.generated.*",
+	":(exclude)dist/*",
+	":(exclude)*/dist/*",
+	":(exclude)build/*",
+	":(exclude)*/build/*",
+	":(exclude)__snapshots__/*",
+	":(exclude)*/__snapshots__/*",
 ];
 
 /** 一個 parent issue 分支相對 main 的完整 diff，給 parent issue reviewer 看跨 child 的全貌。 */
-export function diffForReview(worktreePath: string, fromRef: string, toRef = "HEAD"): string {
-  return git(worktreePath, ["diff", `${fromRef}..${toRef}`, "--", ".", ...REVIEW_EXCLUDED]);
+export function diffForReview(
+	worktreePath: string,
+	fromRef: string,
+	toRef = "HEAD",
+): string {
+	return git(worktreePath, [
+		"diff",
+		`${fromRef}..${toRef}`,
+		"--",
+		".",
+		...REVIEW_EXCLUDED,
+	]);
 }
 
 /** 檔案清單加增刪行數。diff 大到不值得整份送進 prompt 時改送這個。 */
-export function diffStatForReview(worktreePath: string, fromRef: string, toRef = "HEAD"): string {
-  return git(worktreePath, ["diff", `${fromRef}..${toRef}`, "--stat", "--", ".", ...REVIEW_EXCLUDED]);
+export function diffStatForReview(
+	worktreePath: string,
+	fromRef: string,
+	toRef = "HEAD",
+): string {
+	return git(worktreePath, [
+		"diff",
+		`${fromRef}..${toRef}`,
+		"--stat",
+		"--",
+		".",
+		...REVIEW_EXCLUDED,
+	]);
 }
 
 export function diffNameOnly(
-  cwd: string,
-  fromRef: string,
-  toRef: string,
-  pathspec?: string[],
+	cwd: string,
+	fromRef: string,
+	toRef: string,
+	pathspec?: string[],
 ): string[] {
-  const args = ["diff", "--name-only", `${fromRef}..${toRef}`, "--"];
-  const out = git(cwd, pathspec ? [...args, ...pathspec] : [...args, "."]);
-  return out === "" ? [] : out.split("\n");
+	const args = ["diff", "--name-only", `${fromRef}..${toRef}`, "--"];
+	const out = git(cwd, pathspec ? [...args, ...pathspec] : [...args, "."]);
+	return out === "" ? [] : out.split("\n");
 }
 
 /** 越界檢查：agent 的改動有沒有碰到 specs 資料夾。 */
 export function touchesPath(
-  worktreePath: string,
-  baseSha: string,
-  relativePath: string,
+	worktreePath: string,
+	baseSha: string,
+	relativePath: string,
 ): boolean {
-  return diffNameOnly(worktreePath, baseSha, "HEAD", [relativePath]).length > 0;
+	return diffNameOnly(worktreePath, baseSha, "HEAD", [relativePath]).length > 0;
 }
 
 /** merge 前的判定：main 前進的這段是否只有 loom 自己的 specs-only commit。 */
 export function onlyTouchesSpecsDir(
-  repoPath: string,
-  oldMainSha: string,
-  newMainSha: string,
-  specsDir: string,
+	repoPath: string,
+	oldMainSha: string,
+	newMainSha: string,
+	specsDir: string,
 ): boolean {
-  if (oldMainSha === newMainSha) return true;
-  const changed = diffNameOnly(repoPath, oldMainSha, newMainSha, [
-    ".",
-    `:!${specsDir}/`,
-  ]);
-  return changed.length === 0;
+	if (oldMainSha === newMainSha) return true;
+	const changed = diffNameOnly(repoPath, oldMainSha, newMainSha, [
+		".",
+		`:!${specsDir}/`,
+	]);
+	return changed.length === 0;
 }
 
 export type RebaseResult = { ok: true } | { ok: false; conflict: true };
 
 /** 每個 issue 完成後把 spec branch rebase 到最新 main。 */
-export function rebaseOntoMain(worktreePath: string, mainBranch: string): RebaseResult {
-  const ok = gitOk(worktreePath, ["rebase", mainBranch]);
-  if (ok) return { ok: true };
-  gitOk(worktreePath, ["rebase", "--abort"]);
-  return { ok: false, conflict: true };
+export function rebaseOntoMain(
+	worktreePath: string,
+	mainBranch: string,
+): RebaseResult {
+	const ok = gitOk(worktreePath, ["rebase", mainBranch]);
+	if (ok) return { ok: true };
+	gitOk(worktreePath, ["rebase", "--abort"]);
+	return { ok: false, conflict: true };
 }
 
 /**
@@ -191,15 +228,15 @@ export function rebaseOntoMain(worktreePath: string, mainBranch: string): Rebase
  * untracked 檔案也不會中止進行中的 rebase，兩者都必須清掉才是真正乾淨。
  */
 export function threeStageClean(worktreePath: string, baseSha: string): void {
-  gitOk(worktreePath, ["rebase", "--abort"]);
-  git(worktreePath, ["reset", "--hard", baseSha]);
-  git(worktreePath, ["clean", "-fd"]);
+	gitOk(worktreePath, ["rebase", "--abort"]);
+	git(worktreePath, ["reset", "--hard", baseSha]);
+	git(worktreePath, ["clean", "-fd"]);
 }
 
 export interface ConsistencyStatus {
-  clean: boolean;
-  rebaseInProgress: boolean;
-  dirty: boolean;
+	clean: boolean;
+	rebaseInProgress: boolean;
+	dirty: boolean;
 }
 
 /**
@@ -209,71 +246,95 @@ export interface ConsistencyStatus {
  * `git rev-parse --git-dir` 讓 git 自己解析正確位置。
  */
 function resolveGitDir(worktreePath: string): string {
-  const out = git(worktreePath, ["rev-parse", "--git-dir"]);
-  return isAbsolute(out) ? out : join(worktreePath, out);
+	const out = git(worktreePath, ["rev-parse", "--git-dir"]);
+	return isAbsolute(out) ? out : join(worktreePath, out);
 }
 
 /** 崩潰恢復用：這個 worktree 有沒有半途而廢的 rebase 或未 commit 的殘留。 */
 export function checkConsistency(worktreePath: string): ConsistencyStatus {
-  const gitDir = resolveGitDir(worktreePath);
-  const rebaseInProgress =
-    existsSync(join(gitDir, "rebase-merge")) || existsSync(join(gitDir, "rebase-apply"));
-  const dirty = git(worktreePath, ["status", "--porcelain"]) !== "";
-  return {
-    clean: !rebaseInProgress && !dirty,
-    rebaseInProgress,
-    dirty,
-  };
+	const gitDir = resolveGitDir(worktreePath);
+	const rebaseInProgress =
+		existsSync(join(gitDir, "rebase-merge")) ||
+		existsSync(join(gitDir, "rebase-apply"));
+	const dirty = git(worktreePath, ["status", "--porcelain"]) !== "";
+	return {
+		clean: !rebaseInProgress && !dirty,
+		rebaseInProgress,
+		dirty,
+	};
 }
 
 export type MergeResult = { ok: true } | { ok: false; conflict: true };
 
 /** 在 main checkout（repoPath，非 worktree）上執行，spec 全綠才呼叫。 */
 export function mergeSpecIntoMain(
-  repoPath: string,
-  specBranch: string,
-  mainBranch: string,
+	repoPath: string,
+	specBranch: string,
+	mainBranch: string,
 ): MergeResult {
-  git(repoPath, ["checkout", mainBranch]);
-  const ok = gitOk(repoPath, ["merge", "--no-ff", specBranch, "-m", `merge ${specBranch}`]);
-  if (ok) return { ok: true };
-  gitOk(repoPath, ["merge", "--abort"]);
-  return { ok: false, conflict: true };
+	git(repoPath, ["checkout", mainBranch]);
+	const ok = gitOk(repoPath, [
+		"merge",
+		"--no-ff",
+		specBranch,
+		"-m",
+		`merge ${specBranch}`,
+	]);
+	if (ok) return { ok: true };
+	gitOk(repoPath, ["merge", "--abort"]);
+	return { ok: false, conflict: true };
 }
 
 /**
  * 看板「落後 main」欄位：main 已經有、spec branch 還沒 rebase 進來的
  * commit 數。分支不存在（spec 還沒開工）回 null，不當成錯誤。
  */
-export function commitsBehind(repoPath: string, branch: string, mainBranch: string): number | null {
-  if (!gitOk(repoPath, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])) return null;
-  return Number(git(repoPath, ["rev-list", "--count", `${branch}..${mainBranch}`]));
+export function commitsBehind(
+	repoPath: string,
+	branch: string,
+	mainBranch: string,
+): number | null {
+	if (
+		!gitOk(repoPath, [
+			"show-ref",
+			"--verify",
+			"--quiet",
+			`refs/heads/${branch}`,
+		])
+	)
+		return null;
+	return Number(
+		git(repoPath, ["rev-list", "--count", `${branch}..${mainBranch}`]),
+	);
 }
 
 export interface DiffStat {
-  insertions: number;
-  deletions: number;
+	insertions: number;
+	deletions: number;
 }
 
 /** issue 詳情面板的 +/- 統計。worktree 不存在（還沒開工、或 spec 已合併移除）回 null。 */
-export function diffShortStat(worktreePath: string, baseSha: string): DiffStat | null {
-  if (!existsSync(worktreePath)) return null;
-  const out = git(worktreePath, ["diff", "--shortstat", `${baseSha}..HEAD`]);
-  const insertions = /(\d+) insertion/.exec(out);
-  const deletions = /(\d+) deletion/.exec(out);
-  return {
-    insertions: insertions ? Number(insertions[1]) : 0,
-    deletions: deletions ? Number(deletions[1]) : 0,
-  };
+export function diffShortStat(
+	worktreePath: string,
+	baseSha: string,
+): DiffStat | null {
+	if (!existsSync(worktreePath)) return null;
+	const out = git(worktreePath, ["diff", "--shortstat", `${baseSha}..HEAD`]);
+	const insertions = /(\d+) insertion/.exec(out);
+	const deletions = /(\d+) deletion/.exec(out);
+	return {
+		insertions: insertions ? Number(insertions[1]) : 0,
+		deletions: deletions ? Number(deletions[1]) : 0,
+	};
 }
 
 export function removeWorktreeAndBranch(
-  repoPath: string,
-  worktreePath: string,
-  specBranch: string,
+	repoPath: string,
+	worktreePath: string,
+	specBranch: string,
 ): void {
-  gitOk(repoPath, ["worktree", "remove", worktreePath, "--force"]);
-  gitOk(repoPath, ["branch", "-D", specBranch]);
+	gitOk(repoPath, ["worktree", "remove", worktreePath, "--force"]);
+	gitOk(repoPath, ["branch", "-D", specBranch]);
 }
 
 /**
@@ -282,19 +343,19 @@ export function removeWorktreeAndBranch(
  * onlyTouchesSpecsDir 的判定依賴這個不變量成立。
  */
 export function commitStateChange(
-  repoPath: string,
-  specsDir: string,
-  message: string,
+	repoPath: string,
+	specsDir: string,
+	message: string,
 ): CommitResult {
-  // 用明確路徑而不是 `add -A`：路徑底下有被 .gitignore 蓋到的新檔案時，
-  // `git add <path>` 會 exit 非 0 並列出那些路徑，`add -A` 才是靜默跳過。
-  // 所以忽略規則寫太寬（`.loom/` 而不是 `.loom/worktrees/`）在這裡是響亮
-  // 的失敗，不需要另外檢查 -- 這條 add 就是那個檢查。
-  git(repoPath, ["add", specsDir]);
-  const dirty = git(repoPath, ["status", "--porcelain", "--", specsDir]);
-  if (dirty === "") {
-    return { committed: false, sha: currentHead(repoPath) };
-  }
-  git(repoPath, ["commit", "-m", message, "--", specsDir]);
-  return { committed: true, sha: currentHead(repoPath) };
+	// 用明確路徑而不是 `add -A`：路徑底下有被 .gitignore 蓋到的新檔案時，
+	// `git add <path>` 會 exit 非 0 並列出那些路徑，`add -A` 才是靜默跳過。
+	// 所以忽略規則寫太寬（`.loom/` 而不是 `.loom/worktrees/`）在這裡是響亮
+	// 的失敗，不需要另外檢查 -- 這條 add 就是那個檢查。
+	git(repoPath, ["add", specsDir]);
+	const dirty = git(repoPath, ["status", "--porcelain", "--", specsDir]);
+	if (dirty === "") {
+		return { committed: false, sha: currentHead(repoPath) };
+	}
+	git(repoPath, ["commit", "-m", message, "--", specsDir]);
+	return { committed: true, sha: currentHead(repoPath) };
 }

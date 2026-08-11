@@ -110,8 +110,25 @@ export type PromptRoleName = keyof typeof DEFAULT_TEMPLATES;
  * 清單。prompts.test.ts 檢查：模板用到的一定有宣告。
  */
 export const TEMPLATE_VARIABLES: Record<PromptRoleName, string[]> = {
-	coder: ["parent", "parent_md", "context_md", "child_md", "last_failure", "base_sha", "attempt", "scripts"],
-	issue_reviewer: ["parent", "parent_md", "context_md", "child_md", "diff", "base_sha", "attempt"],
+	coder: [
+		"parent",
+		"parent_md",
+		"context_md",
+		"child_md",
+		"last_failure",
+		"base_sha",
+		"attempt",
+		"scripts",
+	],
+	issue_reviewer: [
+		"parent",
+		"parent_md",
+		"context_md",
+		"child_md",
+		"diff",
+		"base_sha",
+		"attempt",
+	],
 	spec_reviewer: ["parent", "parent_md", "context_md", "diff", "main_branch"],
 	chat: ["repo_path"],
 };
@@ -120,8 +137,11 @@ export const TEMPLATE_VARIABLES: Record<PromptRoleName, string[]> = {
  * 變數替換。認得的變數才換，不認得的原樣留著 -- 使用者打錯字時看得到
  * `{spce_md}` 留在 prompt 裡，比默默替換成空字串好查。
  */
-export function renderTemplate(template: string, vars: Record<string, string | undefined>): string {
+export function renderTemplate(
+	template: string,
+	vars: Record<string, string | undefined>,
+): string {
 	return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
-		name in vars ? vars[name] ?? "" : whole,
+		name in vars ? (vars[name] ?? "") : whole,
 	);
 }
