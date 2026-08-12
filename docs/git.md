@@ -1,3 +1,87 @@
+# git 操作 snippet
+
+實測過的 git 操作封裝。核心 know-how 在註解裡，尤其是 pathspec 的兩個坑與 worktree 的 .git 目錄位置。
+
+---
+
+## 三段式清理
+
+單純 `reset --hard` 不夠：不刪 untracked 檔案，也不中止進行中的 rebase。三件事都做才算乾淨：
+
+```ts
+gitOk(worktreePath, ["rebase", "--abort"]);
+git(worktreePath, ["reset", "--hard", baseSha]);
+git(worktreePath, ["clean", "-fd"]);
+```
+
+順序不能顛倒：先 abort rebase，否則 reset 會拒絕在 rebase 中途執行。
+
+---
+
+## review diff 排除清單的兩個 pathspec 坑
+
+lockfile、snapshot、build 產物對 review 零價值，要用 `:(exclude)` 排除。兩個實際撞到的坑：
+
+1. **用長格式 `:(exclude)` 不用短格式 `:!`。** 短格式會把 pattern 開頭字元當 magic signature 解析，`:!__snapshots__/*` 直接死在「Unimplemented pathspec magic '_'」。
+
+2. **不用雙星號。** git 預設比對不帶 FNM_PATHNAME，單個 `*` 本來就跨 `/`，所以 `*.generated.*` 任何深度都中。加雙星號前綴反而要求前面至少一層目錄，根目錄的檔案會漏掉。
+
+```ts
+const REVIEW_EXCLUDED = [
+  ":(exclude)package-lock.json",
+  ":(exclude)pnpm-lock.yaml",
+  ":(exclude)yarn.lock",
+  ":(exclude)bun.lockb",
+  ":(exclude)*.snap",
+  ":(exclude)*.generated.*",
+  ":(exclude)dist/*",
+  ":(exclude)*/dist/*",
+  ":(exclude)build/*",
+  ":(exclude)*/build/*",
+  ":(exclude)__snapshots__/*",
+  ":(exclude)*/__snapshots__/*",
+];
+```
+
+---
+
+## worktree 的 .git 目錄不在 worktree 裡
+
+worktree 沒有自己的 .git 目錄。`worktreePath/.git` 是一個指向 main repo `.git/worktrees/<name>/` 的檔案，rebase-merge、rebase-apply 這些狀態檔實際上在那裡。要偵測 rebase 中途，得先用 `git rev-parse --git-dir` 讓 git 自己解析：
+
+```ts
+function resolveGitDir(worktreePath: string): string {
+  const out = git(worktreePath, ["rev-parse", "--git-dir"]);
+  return isAbsolute(out) ? out : join(worktreePath, out);
+}
+// rebase 中途 = gitDir 底下有 rebase-merge 或 rebase-apply
+```
+
+---
+
+## worktree 目錄自我忽略
+
+worktree 放 repo 內的 `.loom/worktrees/`，那個目錄要自帶 `.gitignore`（內容 `*`），不改 repo 根的 .gitignore。被 `*` 蓋到的 .gitignore 自己照樣生效（git 讀忽略規則不看檔案自身的忽略狀態）。
+
+忽略規則絕不能寫成 `.loom/`，會把 issues 一起蓋掉。
+
+---
+
+## commit 狀態變更用明確路徑不用 `add -A`
+
+```ts
+git(repoPath, ["add", specsDir]);  // 不是 add -A
+```
+
+理由：路徑底下有被 .gitignore 蓋到的新檔案時，`git add <path>` 會 exit 非 0 並列出那些路徑（響亮失敗），`add -A` 才是靜默跳過。這條 add 本身就是檢查。
+
+---
+
+## 完整 snippet
+
+### `git.ts`
+
+```ts
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
@@ -359,3 +443,5 @@ export function commitStateChange(
 	git(repoPath, ["commit", "-m", message, "--", specsDir]);
 	return { committed: true, sha: currentHead(repoPath) };
 }
+
+```

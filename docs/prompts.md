@@ -1,3 +1,40 @@
+# 提示詞模板 snippet
+
+這份綁的是舊模型（parent/child、`{parent_md}`/`{child_md}` 變數名）。`DESIGN.md` 已改名成 issue group + issue（`{group_md}`/`{issue_md}`）。模板的**結構與策略**仍然有效，變數名與角色稱呼要照新設計改。
+
+---
+
+## 變數替換：認得才換，不認得原樣留著
+
+```ts
+export function renderTemplate(template, vars) {
+  return template.replace(/\{(\w+)\}/g, (whole, name) =>
+    name in vars ? (vars[name] ?? "") : whole,
+  );
+}
+```
+
+使用者打錯字時看得到 `{spce_md}` 留在 prompt 裡，比默默替換成空字串好查。已知變數但值是 undefined 才換成空字串。
+
+---
+
+## 一個角色一份模板，不分首次與接手
+
+coder 只有一份模板，`{last_failure}` 為空時那一段就是空的。不另開「重試專用模板」——多一份就多一份要維護的分岔。
+
+---
+
+## schema 不可編輯
+
+`--json-schema` 是狀態轉移的判定依據，改壞了 orchestrator 讀不到 verdict 整條流水線停擺。UI 上顯示為唯讀。prompt 本體改壞了最多品質變差，還救得回來。
+
+---
+
+## 完整 snippet
+
+### `prompts.ts`
+
+```ts
 /**
  * 內建提示詞。
  *
@@ -145,3 +182,77 @@ export function renderTemplate(
 		name in vars ? (vars[name] ?? "") : whole,
 	);
 }
+
+```
+
+### `prompts.test.ts`
+
+```ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+	DEFAULT_TEMPLATES,
+	TEMPLATE_VARIABLES,
+	renderTemplate,
+	type PromptRoleName,
+} from "./prompts.ts";
+
+test("renderTemplate: known variables are substituted, unknown ones are left visible", () => {
+	const out = renderTemplate("a={a} b={b} c={c}", { a: "1", b: "2" });
+	assert.equal(
+		out,
+		"a=1 b=2 c={c}",
+		"a typo'd variable must stay visible, not silently become empty",
+	);
+});
+
+test("renderTemplate: a known variable that is undefined becomes empty, not the literal 'undefined'", () => {
+	assert.equal(
+		renderTemplate("[{last_failure}]", { last_failure: undefined }),
+		"[]",
+	);
+});
+
+test("renderTemplate: substituted content is not itself re-scanned for variables", () => {
+	// parent 描述裡可能出現 {port} 之類的字樣（例如在說明文字裡），那不該被當成
+	// 變數再替換一次 -- String.replace 的單次掃描本來就保證這件事，這個測試
+	// 是把它釘住，避免有人改成迴圈式替換。
+	const out = renderTemplate("<parent>{parent_md}</parent>", {
+		parent_md: "see {port} below",
+		port: "4300",
+	});
+	assert.equal(out, "<parent>see {port} below</parent>");
+});
+
+test("every variable a template uses is declared as available", () => {
+	for (const role of Object.keys(DEFAULT_TEMPLATES) as PromptRoleName[]) {
+		const used = new Set(
+			[...DEFAULT_TEMPLATES[role].matchAll(/\{(\w+)\}/g)].map((m) => m[1]),
+		);
+		const declared = new Set(TEMPLATE_VARIABLES[role]);
+		for (const name of used) {
+			assert.ok(
+				declared.has(name),
+				`${role} template uses {${name}} but the settings page won't list it as available`,
+			);
+		}
+	}
+});
+
+test("default templates are loom-owned and start directly with role instructions", () => {
+	for (const role of Object.keys(DEFAULT_TEMPLATES) as PromptRoleName[]) {
+		assert.doesNotMatch(DEFAULT_TEMPLATES[role], /^\s*<!--/);
+	}
+});
+
+test("default templates use parent/child issue terminology", () => {
+	assert.match(DEFAULT_TEMPLATES.coder, /child issue/);
+	assert.match(DEFAULT_TEMPLATES.coder, /parent_issue/);
+	assert.match(DEFAULT_TEMPLATES.issue_reviewer, /child issue/);
+	assert.match(DEFAULT_TEMPLATES.spec_reviewer, /parent issue/);
+	assert.match(DEFAULT_TEMPLATES.chat, /parent issue/);
+	assert.match(DEFAULT_TEMPLATES.chat, /child issues/);
+});
+
+```
