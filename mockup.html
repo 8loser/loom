@@ -621,11 +621,9 @@
   .card.live {
     border-left-color: var(--accent);
   }
-  .card.retry {
-    border-left-color: var(--warn);
-  }
-  .card.halted {
+  .card.failed {
     border-left-color: var(--crit);
+    opacity: 0.72;
   }
   .card.manual {
     border-left-color: var(--warn);
@@ -1621,17 +1619,17 @@
               data-state="running"
               data-spec="mobile-slot-settings"
               data-project="clinic-web"
-              data-branch="issue/mobile-slot-settings"
+              data-branch="issue-group/0001-mobile-slot-settings"
               data-cost="$1.34"
               data-tok="輸入 1.8M · 輸出 61k"
               data-behind="0 個 code commit"
               data-progress="3 / 7 issue 完成"
               data-elapsed="1h 12m"
-              data-extra="目前 04 實作中，最後一次 rebase 在 12 分鐘前"
+              data-extra="目前 #0001 實作中，最後一次 rebase 在 12 分鐘前"
             >
               <span class="proj">clinic-web</span>
               <span class="name">mobile-slot-settings</span>
-              <span class="branch">issue/mobile-slot-settings</span>
+              <span class="branch">issue-group/0001-mobile-slot-settings</span>
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"><i style="width: 43%"></i></span>
@@ -1642,38 +1640,41 @@
 
             <div class="cell">
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>05</b> migrate-modals-to-form-modal</span>
+                <span class="id"
+                  ><b>#0002</b> migrate-modals-to-form-modal</span
+                >
               </div>
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>06</b> mobile-layout</span>
+                <span class="id"><b>#0003</b> mobile-layout</span>
               </div>
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>07</b> mobile-e2e-coverage</span>
+                <span class="id"><b>#0004</b> mobile-e2e-coverage</span>
                 <span class="foot"><span class="e2e">E2E</span></span>
               </div>
             </div>
             <div class="cell">
-              <div class="card live retry on" tabindex="0" role="button">
+              <div class="card live on" tabindex="0" role="button">
                 <span class="id"
-                  ><b>04</b> split-shared-components-and-data-hook</span
+                  ><b>#0001</b> split-shared-components-and-data-hook</span
                 >
                 <span class="foot">
                   <span class="pulse" aria-hidden="true"></span>
                   <span>coder 4m12s</span>
-                  <span class="hot">第 2 / 3 次</span>
                 </span>
               </div>
             </div>
             <div class="cell"></div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>01</b> fix-e2e-page-object</span>
+                <span class="id"><b>#0005</b> fix-e2e-page-object</span>
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>02</b> extract-slot-timeline-module</span>
+                <span class="id"
+                  ><b>#0006</b> extract-slot-timeline-module</span
+                >
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>03</b> shared-timeline-range</span>
+                <span class="id"><b>#0007</b> shared-timeline-range</span>
               </div>
             </div>
 
@@ -1684,17 +1685,19 @@
               data-state="running"
               data-spec="mobile-appointment-week-strip"
               data-project="clinic-web"
-              data-branch="issue/mobile-appointment-week-strip"
+              data-branch="issue-group/0002-mobile-appointment-week-strip"
               data-cost="$0.72"
               data-tok="輸入 940k · 輸出 33k"
               data-behind="0 個 code commit"
               data-progress="2 / 7 issue 完成"
               data-elapsed="38m"
-              data-extra="目前 03 驗證中（e2e），最後一次 rebase 在 6 分鐘前"
+              data-extra="目前 #0010 驗證中（e2e），最後一次 rebase 在 6 分鐘前"
             >
               <span class="proj">clinic-web</span>
               <span class="name">mobile-appointment-week-strip</span>
-              <span class="branch">issue/mobile-appointment-week-strip</span>
+              <span class="branch"
+                >issue-group/0002-mobile-appointment-week-strip</span
+              >
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"><i style="width: 29%"></i></span>
@@ -1705,26 +1708,26 @@
 
             <div class="cell">
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>04</b> extract-gap-computation</span>
+                <span class="id"><b>#0008</b> extract-gap-computation</span>
               </div>
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>05</b> extract-day-timeline</span>
+                <span class="id"><b>#0009</b> extract-day-timeline</span>
               </div>
               <div class="card" tabindex="0" role="button">
                 <span class="id"
-                  ><b>06</b> distinguish-load-failure-from-empty</span
+                  ><b>#0024</b> distinguish-load-failure-from-empty</span
                 >
               </div>
               <div class="card" tabindex="0" role="button">
                 <span class="id"
-                  ><b>07</b> slot-settings-time-format-validation</span
+                  ><b>#0025</b> slot-settings-time-format-validation</span
                 >
               </div>
             </div>
             <div class="cell"></div>
             <div class="cell">
               <div class="card live" tabindex="0" role="button">
-                <span class="id"><b>03</b> phantom-occupancy-row</span>
+                <span class="id"><b>#0010</b> phantom-occupancy-row</span>
                 <span class="foot">
                   <span class="pulse" aria-hidden="true"></span>
                   <span>e2e 2m 10s</span>
@@ -1734,10 +1737,10 @@
             </div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>01</b> week-strip-today-first</span>
+                <span class="id"><b>#0011</b> week-strip-today-first</span>
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>02</b> occupancy-dots-union</span>
+                <span class="id"><b>#0012</b> occupancy-dots-union</span>
               </div>
             </div>
 
@@ -1748,30 +1751,30 @@
               data-state="blocked"
               data-spec="onboarding-defaults"
               data-project="booking-widget"
-              data-branch="issue/onboarding-defaults"
+              data-branch="issue-group/0003-onboarding-defaults"
               data-cost="$1.96"
               data-tok="輸入 2.4M · 輸出 88k"
               data-behind="2 個 code commit"
               data-progress="1 / 3 issue 完成"
               data-elapsed="停住 2h 4m"
-              data-extra="02 已改三次仍未通過 review，第三次是從基準重寫的"
+              data-extra="#0014 連續失敗，已用盡 2 個接手額度（retry_loop）"
             >
               <span class="proj">booking-widget</span>
               <span class="name">onboarding-defaults</span>
-              <span class="branch">issue/onboarding-defaults</span>
+              <span class="branch">issue-group/0003-onboarding-defaults</span>
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"
                   ><i style="width: 33%; background: var(--crit)"></i
                 ></span>
                 <span class="c">1 / 3</span>
-                <span class="c">停在 02</span>
+                <span class="c">接手 2/2</span>
               </span>
             </button>
 
             <div class="cell">
               <div class="card manual" tabindex="0" role="button">
-                <span class="id"><b>03</b> default-clinic-hours</span>
+                <span class="id"><b>#0013</b> default-clinic-hours</span>
                 <span class="foot"><span class="hot">等你動手</span></span>
                 <span class="foot cardacts">
                   <button class="btn" type="button">標為完成</button>
@@ -1781,17 +1784,15 @@
               <div class="queued">不依賴 02，但要人決定預設值</div>
             </div>
             <div class="cell">
-              <div class="card halted" tabindex="0" role="button">
-                <span class="id"><b>02</b> seed-onboarding-state</span>
-                <span class="foot"
-                  ><span class="bad">3 / 3 次未通過</span></span
-                >
+              <div class="card failed" tabindex="0" role="button">
+                <span class="id"><b>#0014</b> seed-onboarding-state</span>
+                <span class="foot"><span class="bad">domain 失敗</span></span>
               </div>
             </div>
             <div class="cell"></div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>01</b> onboarding-state-machine</span>
+                <span class="id"><b>#0015</b> onboarding-state-machine</span>
               </div>
             </div>
 
@@ -1802,7 +1803,7 @@
               data-state="mergeable"
               data-spec="appointment-detail-sheet"
               data-project="clinic-admin"
-              data-branch="issue/appointment-detail-sheet"
+              data-branch="issue-group/0004-appointment-detail-sheet"
               data-cost="$2.14"
               data-tok="輸入 2.9M · 輸出 96k"
               data-behind="0 個 code commit"
@@ -1811,7 +1812,9 @@
             >
               <span class="proj">clinic-admin</span>
               <span class="name">appointment-detail-sheet</span>
-              <span class="branch">issue/appointment-detail-sheet</span>
+              <span class="branch"
+                >issue-group/0004-appointment-detail-sheet</span
+              >
               <span class="spacer"></span>
               <span class="prog">
                 <span class="bar"
@@ -1827,55 +1830,55 @@
             <div class="cell"></div>
             <div class="cell">
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>01</b> sheet-shell</span>
+                <span class="id"><b>#0016</b> sheet-shell</span>
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>02</b> patient-summary-block</span>
+                <span class="id"><b>#0017</b> patient-summary-block</span>
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>03</b> status-transitions</span>
+                <span class="id"><b>#0018</b> status-transitions</span>
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>04</b> sheet-a11y</span>
+                <span class="id"><b>#0019</b> sheet-a11y</span>
               </div>
               <div class="card shipped" tabindex="0" role="button">
-                <span class="id"><b>05</b> detail-sheet-e2e</span>
+                <span class="id"><b>#0020</b> detail-sheet-e2e</span>
                 <span class="foot"><span class="good">e2e 通過</span></span>
               </div>
             </div>
 
-            <!-- lane 5：跨 parent 依賴示範，等另一個 parent 合併才開跑 -->
+            <!-- lane 5：跨 group 依賴示範，等另一個 group 合併才開跑 -->
             <button
               class="lane"
               type="button"
               data-state="queued"
               data-spec="slot-recurrence-rules"
               data-project="clinic-web"
-              data-branch="issue/slot-recurrence-rules"
+              data-branch="issue-group/0005-slot-recurrence-rules"
               data-dep="mobile-slot-settings"
               data-cost="—"
               data-tok="—"
               data-behind="等依賴合併"
               data-progress="0 / 3 issue"
               data-elapsed="尚未開始"
-              data-extra="這個 parent issue 等 mobile-slot-settings 合併進 main 才開跑；開跑時從 main 分支，自然吃得到它的產出。"
+              data-extra="這個 issue group 等 mobile-slot-settings 合併進 main 才開跑；開跑時從 main 分支，自然吃得到它的產出。"
             >
               <span class="proj">clinic-web</span>
               <span class="name">slot-recurrence-rules</span>
-              <span class="branch">issue/slot-recurrence-rules</span>
+              <span class="branch">issue-group/0005-slot-recurrence-rules</span>
               <span class="spacer"></span>
               <span class="wait">等 <b>mobile-slot-settings</b> 合併</span>
             </button>
 
             <div class="cell">
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>01</b> recurrence-rrule-parser</span>
+                <span class="id"><b>#0021</b> recurrence-rrule-parser</span>
               </div>
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>02</b> slot-recurrence-ui</span>
+                <span class="id"><b>#0022</b> slot-recurrence-ui</span>
               </div>
               <div class="card" tabindex="0" role="button">
-                <span class="id"><b>03</b> recurrence-e2e</span>
+                <span class="id"><b>#0023</b> recurrence-e2e</span>
                 <span class="foot"><span class="e2e">E2E</span></span>
               </div>
             </div>
@@ -1900,7 +1903,9 @@
           <div class="dhead">
             <span class="label" id="sp-state">可以合併</span>
             <h2 id="sp-name">appointment-detail-sheet</h2>
-            <div class="sub" id="sp-branch">issue/appointment-detail-sheet</div>
+            <div class="sub" id="sp-branch">
+              issue-group/0004-appointment-detail-sheet
+            </div>
           </div>
 
           <dl class="facts">
@@ -1966,7 +1971,7 @@
             <span class="label">實作中 · mobile-slot-settings</span>
             <h2>04 split-shared-components-and-data-hook</h2>
             <div class="sub">
-              worktree ~/.loom/worktrees/clinic-web/mobile-slot-settings
+              worktree ~/.loom/worktrees/0001-mobile-slot-settings
             </div>
           </div>
 
@@ -2020,7 +2025,7 @@
             <div class="line tool">
               <span class="t">14:21:47</span><span class="k">讀取</span
               ><span class="m"
-                >.loom/issues/mobile-slot-settings/parent.md</span
+                >.loom/issues/0001-mobile-slot-settings/group.md</span
               >
             </div>
             <div class="line say">
@@ -2281,7 +2286,9 @@
         <div class="go">
           <p class="note">
             寫進
-            <span class="mono">.loom/issues/week-strip-ipad-portrait/</span>
+            <span class="mono"
+              >.loom/issues/0006-week-strip-ipad-portrait/</span
+            >
             並立刻開始跑 01。已經開始的 issue 之後就不能再改。
           </p>
           <button class="btn primary" type="button">建立並開始執行</button>
@@ -2354,7 +2361,7 @@
               coder
             </button>
             <button class="prole" type="button">issue reviewer</button>
-            <button class="prole" type="button">parent issue reviewer</button>
+            <button class="prole" type="button">group reviewer</button>
             <button class="prole" type="button">chat</button>
           </div>
           <div class="provcfg">
@@ -2378,7 +2385,7 @@ public interfaces, not implementation details.
 
 A seam is the public boundary you test at. Tests live at
 seams, never against internals. The seams for this work are
-already agreed in the parent issue's Testing Decisions below — work
+already agreed in the issue group's Testing Decisions below — work
 at those, do not introduce new ones.
 
 Work in vertical slices: one test → one implementation →
@@ -2389,8 +2396,8 @@ repeat, each test a tracer bullet.
 交棒前自己跑一次 typecheck 與 unit test。
 不要修改 .loom 底下的任何檔案。
 
-&lt;parent_issue&gt;{parent_md}&lt;/parent_issue&gt;
-&lt;child_issue&gt;{child_md}&lt;/child_issue&gt;
+&lt;issue_group&gt;{group_md}&lt;/issue_group&gt;
+&lt;issue&gt;{issue_md}&lt;/issue&gt;
 &lt;上一輪失敗&gt;{last_failure}&lt;/上一輪失敗&gt;</textarea>
         </div>
 
@@ -2543,7 +2550,7 @@ repeat, each test a tracer bullet.
   const ROLE_CFG = {
     coder: { cli: "claude code", model: "sonnet" },
     "issue reviewer": { cli: "claude code", model: "sonnet" },
-    "parent issue reviewer": { cli: "claude code", model: "opus" },
+    "group reviewer": { cli: "claude code", model: "opus" },
     chat: { cli: "claude code", model: "sonnet" },
   };
 
@@ -2906,9 +2913,7 @@ repeat, each test a tracer bullet.
     } else {
       setBody([
         noteRun(lane.dataset.extra),
-        noteRun(
-          "parent issue review 與整體 e2e 要等全部 child issue 到達終端後才跑。",
-        ),
+        noteRun("group review 與整體 e2e 要等全部 issue 到達終端後才跑。"),
       ]);
     }
     foot.hidden = !mergeable;
