@@ -90,7 +90,7 @@ branch、worktree、issues 目錄共用同一個 `<NNNN>-<slug>` token，三者�
 
 ### agent 邊界
 
-- 四個 LLM 角色：chat、coder、issue reviewer、group reviewer。**沒有 tester**（`reviewing.test_verification` 裡的測試由 orchestrator subprocess 跑，不是 LLM）。
+- 五個 LLM 角色：chat、planning、coder、issue reviewer、group reviewer。**沒有 tester**（`reviewing.test_verification` 裡的測試由 orchestrator subprocess 跑，不是 LLM）。
 - coder 不重新規劃 group、不在無人值守階段加需求；只完成當前 issue。
 - coder 禁碰 `.loom/`（保護 orchestrator 狀態）。
 - chat 禁改任何檔案（`--disallowedTools Write Edit`）。
@@ -316,7 +316,7 @@ git clean -fd
 
 **分支漂移**：靠每個 issue 完成後的 rebase 吸收其他 group 已合併的東西，不會累積成巨大分歧。
 
-**撞車**：兩個 group 改到同一批檔案，後者的 rebase 會衝突進 blocked。不做預先偵測 -- 那需要 chat 產 group 時宣告「會動到哪些路徑」，而 agent 經常改到沒預期的檔案，不可靠的預測會給出假的安全感。rebase 衝突本身就是可靠的安全網，代價只是手動把其中一個往後排。看板上要把「blocked 原因是 rebase 衝突」標清楚，讓人一眼看出是撞車不是 agent 做壞。
+**撞車**：兩個 group 改到同一批檔案，後者的 rebase 會衝突進 blocked。planning agent 會做預先偵測（見「planning agent」）：讀活 issue 的 `touches[]` 與新 issue 的預測檔案範圍，重疊就編排 block 或順序。但這是建議不是保證——agent 預測的檔案範圍會不準，rebase 衝突本身仍是可靠的安全網。看板上要把「blocked 原因是 rebase 衝突」標清楚，讓人一眼看出是撞車不是 agent 做壞。
 
 **過期的驗證結果**：group 進 mergeable 後等人按按鈕的期間，另一個 group 可能已經合併。所以按下 merge 時先 rebase，若帶進新 commit 就退回 verifying 重驗。這是「七個綠燈的 issue 疊起來未必綠」同一個論證的延伸：兩個各自綠燈的 group 疊起來也未必綠。
 
@@ -467,11 +467,12 @@ orchestrator 持有狀態並依狀態 spawn 對應的 subprocess。不是 coder 
 
 不用 agent 輪詢的理由：那需要常駐 daemon 各自掃狀態、各自搶單、處理兩個 agent 抓到同一個 issue。push 模型只有一個寫入者，沒有競爭者，體感一樣而實作少一半。
 
-### 四個 LLM 角色
+### 五個 LLM 角色
 
 | 角色 | 輸入 | `--json-schema` 輸出 |
 | --- | --- | --- |
-| chat | 對話，cwd 在 main checkout，`--disallowedTools Write Edit` | `{group_md, issues:[{title, body, blocked_by[], e2e, needs_human}]}` |
+| chat | 對話，cwd 在 main checkout，`--tools Read,Glob,Grep` | rough draft：`{group_md, issues:[{title, body}]}` |
+| planning | chat 的 rough draft + orchestrator 餵的活 issue 檔案範圍 + base branch code | `{groups:[{slug, group_md, issues:[{title, body, blocked_by[], e2e, needs_human, touches[]}]}]}` |
 | coder | group 描述 + issue + 前次失敗紀錄 | `{done, summary, files_changed[]}` |
 | issue reviewer | group 描述 + issue + `git diff <base_sha>..HEAD` | `{verdict, comments[]}` |
 | group reviewer | group 描述 + 全部 issue + `git diff <base-branch>...issue-group/<NNNN>-<slug>` | `{comments[]}`，沒有 verdict，因為它不決定流程 |
@@ -481,6 +482,32 @@ coder 在交棒前自己跑一次 typecheck 與 unit test。這是 self-check，
 reviewer 的乾淨 context 是它獨立性的來源，不是缺點。它只該看 diff 和需求，不該看 coder 的辯解。
 
 reviewer 同時負責判定測試品質：這些測試是在測行為還是在測實作細節、覆蓋夠不夠。不足就 `verdict: reject` 附 comment。
+
+### planning agent：語意工作與確定性工作的分界
+
+orchestrator 的決策一律確定性、不用 LLM 做流程判斷（見「派工與執行」）。所以產 issue 的工作拆成兩半，各自落在做得了的那一側：
+
+**planning agent（LLM）負責語意判斷：**
+
+- 從討論拆出要做哪些 issue
+- 分群：哪些 issue 適合綁在同一個 group（可一起 review、合併 simplify）
+- 預測每個 issue 會碰哪些檔（`touches[]`）
+- 判定 `e2e`／`needs_human` 旗標
+- 重複偵測：對照 base branch 的 code，判斷討論要做的事是不是已經有了（不比 issue 清單，直接讀 code）
+
+**orchestrator（確定性）負責機械工作：**
+
+- 用 `touches[]` 算檔案重疊，判定跨 group 與 group 內的 block 關係
+- 拓撲排序
+- 配 group 序號與 issue 全域號、生 front matter、寫檔、commit
+
+這個 split 跟既有設計一致：chat 產結構化 draft、`createGroupFromDraft` 做寫入。差別是中間多一道 planning，把原本「chat 直接定稿」拆成「chat 產 rough draft → planning 產最終 group(s) → orchestrator 落地」。
+
+**為什麼不擴充 chat。** planning 需要讀 orchestrator 餵的活 issue 檔案範圍，那是運行時狀態。把運行時狀態塞進 chat 的常駐對話會污染它、也讓 chat 的工具限制（只讀 repo code）變得不清。planning 是一次性呼叫、吃結構化狀態、不做對話，跟 chat 的常駐雙向串接是兩種形狀。
+
+**planning 只建議不寫入。** 跟 chat 同一份 `--tools Read,Glob,Grep` 限制：讀 base branch code、讀討論 draft、產結構化建議，不寫檔、不 commit。人看過、調整過，按定稿按鈕才落地。拆 issue 與排依賴是人最該介入的決策點，不該讓 LLM 自動生效。
+
+**planning 不負責估算成本時程，也不改寫討論措辭。** 成本要依賴實際 codebase 大小與歷史 run 資料，不是討論內容推得出來的；措辭潤飾等於讓 LLM 自己加 spec，跟 coder「不重新規劃 group」是同一條規則的延伸。
 
 ### 沒有 tester agent
 
@@ -569,7 +596,7 @@ orchestrator 把測試 stdout 存進 DB，coder 下一輪的 prompt 帶最後 20
 
 全塞進 context 太貴，完全不給又逼它多跑一次。
 
-## chat 產 issue group
+## chat 與 planning 產 issue group
 
 常駐 `claude -p --input-format stream-json --output-format stream-json`，web 端雙向串接，cwd 在 main checkout。實作在 `src/chat.ts`：一個 workspace 同時只有一份進行中的討論（`chat_sessions` 表，`workspace_id` 當 PK），對應討論分頁上單一 thread 的畫面。
 
@@ -577,13 +604,13 @@ orchestrator 把測試 stdout 存進 DB，coder 下一輪的 prompt 帶最後 20
 
 常駐 process 是效能優化（同一個 process 上的每一輪吃得到 prompt cache），不是正確性要求：`session_id` 落 DB，process 閒置逾時（10 分鐘）或意外死掉都用 `--resume` 補一個新的，對話從模型角度不斷。**兩個 process 不能同時碰同一個 session** -- 定稿前一定要先把常駐 process 完全結束（等到 `close` 事件，不是叫了 `stdin.end()` 就當結束），再用一次性呼叫 `--resume` 疊上去，不然會拿到「找不到這個 session」（`--resume` 也綁 cwd，同一個 session 用不同 cwd 去 resume 一樣找不到）。
 
-**拆 issue 在同一輪對話裡做**，不另外派 agent。拆分方式是設計決策：哪些改動綁在一起、誰先誰後、依賴邊怎麼連，這是人最該介入的地方。
+**拆 issue 不在 chat 裡做。** chat 只負責把粗略想法談成一份 rough draft（`{group_md, issues:[{title, body}]}`）；分群、依賴、旗標、衝突偵測是 planning agent 的工作，見「planning agent」。拆分方式是設計決策：哪些改動綁在一起、誰先誰後、依賴邊怎麼連，這是人最該介入的地方，所以多一道 planning 讓人看過再定稿。
 
-落地時疊一次 `--resume` + `--json-schema` 的一次性呼叫（不是常駐 process 那條線）拿 `{slug, group_md, issues[{title, body, blocked_by[], e2e, needs_human}]}`，orchestrator（`createGroupFromDraft`）負責配 group 序號與各 issue 的全域號、生 front matter、寫檔、commit 一次。狀態欄位不能讓 LLM 寫。group 序號與 issue 全域號都是 workspace 內單調遞增、定稿時配、不可改不可重用；`blocked_by` 在 draft 裡引用的是其他 issue 的 `title`（LLM 產出當下還不知道最終編號），落地時才轉成實際的全域 issue number。`slug` 沒通過 kebab-case 檢查就從 `group_md` 的內容 slugify 退回，不讓一個格式錯誤擋住整個定稿。
+落地時疊一次 `--resume` + `--json-schema` 的一次性呼叫（不是常駐 process 那條線）拿 rough draft `{slug, group_md, issues:[{title, body}]}`，交給 planning agent 產最終的 `{groups:[...]}`，再由 orchestrator（`createGroupFromDraft`）配 group 序號與各 issue 的全域號、生 front matter、寫檔、commit 一次。狀態欄位不能讓 LLM 寫。group 序號與 issue 全域號都是 workspace 內單調遞增、定稿時配、不可改不可重用；`blocked_by` 在 planning 產出裡引用的是其他 issue 的 `title`（LLM 產出當下還不知道最終編號），落地時才轉成實際的全域 issue number。`slug` 沒通過 kebab-case 檢查就從 `group_md` 的內容 slugify 退回，不讓一個格式錯誤擋住整個定稿。
 
-schema 裡的 `needs_human` 是分類旗標不是狀態欄位，跟 `e2e` 同一層級 -- 由 orchestrator 決定寫成 `human` 還是 `ready`。沒有它的話，chat 裡討論出「需要判斷、需要外部存取」的 issue 只能標成 ready，然後發生的正是 `human` 狀態要避免的浪費：被 agent 抓走、失敗、開接手 issue、又失敗，浪費兩個 issue 才得到「這件事本來就不該自動做」。
+schema 裡的 `needs_human` 與 `e2e` 是分類旗標不是狀態欄位，由 orchestrator 決定寫成 `human` 還是 `ready`、`e2e` 是否要跑 e2e。這兩個旗標在 planning agent 那一步就標好，不是丟給 coder 去猜或事後補。沒有 `needs_human` 的話，討論出「需要判斷、需要外部存取」的 issue 只能標成 ready，然後發生的正是 `human` 狀態要避免的浪費：被 agent 抓走、失敗、開接手 issue、又失敗，浪費兩個 issue 才得到「這件事本來就不該自動做」。
 
-**定稿按鈕就是開跑按鈕。** 剛討論完內容已經看過，再插一道 draft review 是多餘摩擦，UI 上沒有「先看草稿再確認」兩步 -- 按下「建立並開始執行」直接寫檔、commit、喚醒排程器，切去看板看新 group。手寫丟進資料夾的 draft group 才需要看板上的放行按鈕。
+**定稿按鈕不是開跑按鈕。** planning 產出的是建議，人看過、調整過，再按定稿才落地（寫檔、commit、喚醒排程器）。這是多出來的一道，刻意的：拆 issue 與排依賴是人最該介入的決策點，planning 給建議、人拍板。手寫丟進資料夾的 draft group 不走這條路，它本來就是人寫的，只需要看板上的放行按鈕。
 
 定稿那一刻把這次討論的 `session_id` 從 `chat_sessions` 搬進 `group_state.chat_session_id`，`chat_sessions` 那列刪掉。**開跑後只能改還沒開始的 issue，可以追加新 issue，進行中和已完成的鎖住** -- 這條規則本身還沒有介面實作，`chat_session_id` 先落地是為它鋪路：orchestrator 本來就在派工前才讀 issue 檔案，所以這幾乎零成本。修改走 `--resume` 回到原對話以維持 group 描述一致性，或直接編輯檔案。
 
