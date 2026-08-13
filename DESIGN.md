@@ -22,6 +22,7 @@ loom 的設計從這幾條設計公設推導出來，規則與狀態機都該回
 | 概念 | 定義 |
 | --- | --- |
 | workspace | 一個 git repo 加上它的執行設定 |
+| base branch | workspace 設定的整合分支（`develop`、`main`、`trunk` 等，由使用者決定）。所有 group branch 從它分出、rebase 回它、merge 回它。設定欄位 `base_branch` |
 | issue group | 討論定稿後產生的一組 issue。不是 issue；一條 `issue-group/<NNNN>-<slug>` 分支、一個 worktree、一個 merge 單位，在看板上顯示為 lane |
 | issue | 唯一的工作單元，掛在某個 issue group 底下。狀態機直接作用在這層，是 coder/reviewer 實際處理的單元 |
 
@@ -80,9 +81,9 @@ branch、worktree、issues 目錄共用同一個 `<NNNN>-<slug>` token，三者�
 ### git
 
 - **coder 不自己 commit**，orchestrator 代 commit；diff 為空送 reviewer 判定。
-- 每個 issue 完成後 rebase group branch 到最新 main；衝突寫 `blocked_reason: rebase_conflict`。
+- 每個 issue 完成後 rebase group branch 到最新 base branch；衝突寫 `blocked_reason: rebase_conflict`。
 - 清理一律**三段式**：`rebase --abort || true` → `reset --hard <base_sha>` → `clean -fd`。
-- merge 粒度：group 全綠才一次 merge 回 main，**人工觸發**。
+- merge 粒度：group 全綠才一次 merge 回 base branch，**人工觸發**。
 - merge 時先 rebase；帶進**非 issues 路徑**的 commit 才退回 verifying 重驗（排除 loom 自己的狀態 commit）。
 - 只有 orchestrator 在 main checkout 寫 issues front matter；agent worktree 不碰 `.loom/issues`。
 - group merged 後回收 worktree、刪 branch。
@@ -270,15 +271,15 @@ first-match 是必要的：`blocked` 與「執行中」可以同時成立（`Blo
 | worktree 位置 | `<repo>/.loom/worktrees/<NNNN>-<slug>`，目錄自帶 `.gitignore`（內容 `*`）不讓它弄髒主 checkout |
 | issue 執行順序 | 同 group 依 issue 編號序列，跨 group 平行；有 issue 卡住時用 `Blocked by` 判斷哪些後續仍可做 |
 | 平行上限 | per-workspace，預設 2。每個跑動的 group 佔一個 worktree、一份依賴、一個 claude process，測試期間可能再多一個測試自己起的 server |
-| merge 粒度 | group 全綠才一次 merge 回 main，人工觸發 |
+| merge 粒度 | group 全綠才一次 merge 回 base branch，人工觸發 |
 | coder 交棒時 | **orchestrator 代 commit**，見下節 |
-| 每個 issue 完成後 | rebase group branch 到最新 main，衝突就寫 `blocked_reason: rebase_conflict` |
+| 每個 issue 完成後 | rebase group branch 到最新 base branch，衝突就寫 `blocked_reason: rebase_conflict` |
 | 按下 merge 時 | 先 rebase；若帶進**碰到 issues 以外路徑**的 commit 才退回 verifying 重驗，過了才真的合併 |
 | merged 之後 | `git worktree remove` 加 `git branch -d issue-group/<NNNN>-<slug>` |
 
 **worktree 放 repo 內。** 放 `~/.loom/worktrees/` 的話 worktree 會在 repo 被刪之後變成孤兒、路徑也跟專案脫節。Claude Code 自己的 `EnterWorktree` 用 `.claude/worktrees/`，是同一個取捨的旁證。
 
-這個決定曾經有一項代價：coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 `CLAUDE.md`，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md`，那是 main branch 的版本，會跟 worktree 自己 checkout 出來的那份疊加，而且沒有訊號能分辨哪份該贏。改成只吃使用者層之後專案的 `CLAUDE.md` 不再載入，這項代價消失了。
+這個決定曾經有一項代價：coder 的 cwd 是 worktree，Claude Code 從那裡一路往上找 `CLAUDE.md`，路徑必然經過主 checkout 的 `<repo>/CLAUDE.md`，那是 base branch 的版本，會跟 worktree 自己 checkout 出來的那份疊加，而且沒有訊號能分辨哪份該贏。改成只吃使用者層之後專案的 `CLAUDE.md` 不再載入，這項代價消失了。
 
 **目錄自我忽略，不改 repo 根的 `.gitignore`。** 建 worktree 前先寫 `.loom/worktrees/.gitignore`，內容一個 `*`。repo 根那份是使用者的檔案，loom 不去動它；被 `*` 蓋到的 `.gitignore` 自己照樣生效，git 讀忽略規則不看檔案自身的忽略狀態。忽略規則絕不能寫成 `.loom/` -- 那會把 `issues` 一起蓋掉，狀態 commit 就沒有路徑可以落地。失敗是響亮的（`commitStateChange` 用明確路徑 `git add .loom/issues`，底下有被 ignore 的新檔案時 git 會 exit 非 0 並列出來），所以不需要另外做啟動檢查；`add -A` 才是會靜默跳過的那種寫法，這也是不用它的理由之一。
 
@@ -319,10 +320,10 @@ git clean -fd
 
 **過期的驗證結果**：group 進 mergeable 後等人按按鈕的期間，另一個 group 可能已經合併。所以按下 merge 時先 rebase，若帶進新 commit 就退回 verifying 重驗。這是「七個綠燈的 issue 疊起來未必綠」同一個論證的延伸：兩個各自綠燈的 group 疊起來也未必綠。
 
-**但判定必須排除 loom 自己的狀態 commit。** 每個 issue 進 done 時 orchestrator 都往 main 塞一個只動 issues 的 commit，所以另一個 group 只要還在跑，main 就一直在前進。照「帶進任何新 commit 就重驗」會讓 mergeable 的 group 被反覆打回 verifying 跑幾分鐘 e2e，而帶進來的東西跟任何 code 無關，每次還要人再按一次按鈕。判定式是：
+**但判定必須排除 loom 自己的狀態 commit。** 每個 issue 進 done 時 orchestrator 都往 base branch 塞一個只動 issues 的 commit，所以另一個 group 只要還在跑，base branch 就一直在前進。照「帶進任何新 commit 就重驗」會讓 mergeable 的 group 被反覆打回 verifying 跑幾分鐘 e2e，而帶進來的東西跟任何 code 無關，每次還要人再按一次按鈕。判定式是：
 
 ```
-git diff --name-only <old-main>..<new-main> -- . ':!.loom/issues/'
+git diff --name-only <old-base>..<new-base> -- . ':!.loom/issues/'
 ```
 
 輸出為空就直接合併，不重驗。
@@ -349,9 +350,9 @@ merge 本身不需要額外的鎖，orchestrator 是單一事件迴圈，兩個 
 
 **不用來平行化。** 一個 group 一個 worktree，兩個 issue 同時改同一份 checkout 會撞。邊只改變「跳過哪些」，不改變「同時幾個在跑」。
 
-**跨 group（group → group）：排序。** 這是舊設計沒有的能力。預設 group 之間獨立、各自可開跑；group B 宣告 `blocked_by` group A 表示 B 要等 A。語意是 **wait-for-merge**：B 不開跑，直到 A 合併進 main，B 開跑時從 main 分支，自然吃得到 A 的產出，不需要共用 checkout。
+**跨 group（group → group）：排序。** 這是舊設計沒有的能力。預設 group 之間獨立、各自可開跑；group B 宣告 `blocked_by` group A 表示 B 要等 A。語意是 **wait-for-merge**：B 不開跑，直到 A 合併進 base branch，B 開跑時從 base branch 分支，自然吃得到 A 的產出，不需要共用 checkout。
 
-**限同一個 workspace。** wait-for-merge 靠的是「A 合進 main、B 從 main 分支」，而 main 是 per-repo 的；A 在別的 workspace（別的 repo）合進它自己的 main，不會出現在 B 的 repo 裡，B 等了也吃不到 A 的程式碼。跨 workspace 的依賴會退化成沒有程式碼流的軟性排程提示，那是另一種東西，不支援。
+**限同一個 workspace。** wait-for-merge 靠的是「A 合進 base branch、B 從 base branch 分支」，而 base branch 是 per-repo 的；A 在別的 workspace（別的 repo）合進它自己的 base branch，不會出現在 B 的 repo 裡，B 等了也吃不到 A 的程式碼。跨 workspace 的依賴會退化成沒有程式碼流的軟性排程提示，那是另一種東西，不支援。
 
 **風險與緩解**：依賴邊是人或 LLM 宣告的，會漏。漏宣告的代價只出現在異常路徑（同 group 內有東西卡住時，或跨 group 時 B 拿不到 A 的產出），而異常路徑本來就是人要看的。沒有 `Blocked by` 這一行的 issue（手寫的）預設當成依賴前一個，退回編號序列。
 
@@ -361,7 +362,7 @@ merge 本身不需要額外的鎖，orchestrator 是單一事件迴圈，兩個 
 
 orchestrator 在每個 issue 開工時記下 group branch 當下的 HEAD，存進 DB。
 
-reviewer 用 `git diff <base_sha>..HEAD`。沒有這個欄位的話只能用 `git diff main..HEAD`，那會包含同 group 前面所有 issue 的改動，issue 07 的 review 會看到 01 到 06 的全部東西。
+reviewer 用 `git diff <base_sha>..HEAD`。沒有這個欄位的話只能用 `git diff <base-branch>..HEAD`，那會包含同 group 前面所有 issue 的改動，issue 07 的 review 會看到 01 到 06 的全部東西。
 
 base_sha 同時提供「退回 issue 開工前」的能力，重試策略依賴它。
 
@@ -374,7 +375,7 @@ base_sha 同時提供「退回 issue 開工前」的能力，重試策略依賴�
 1. **只有 orchestrator 在 main checkout 寫 front matter，agent 的 worktree 不碰 issues 資料夾。** 單邊修改 git 自動合併，雙邊寫同一個 YAML 就是衝突。
 2. merge 前檢查 diff 是否碰到 issues 路徑，碰到就 blocked。
 3. front matter 只放狀態機需要的欄位。review 意見全文、測試輸出、session id、耗時、成本進 DB。那些是幾 KB 的雜訊，塞進 git-tracked 檔案會讓每次狀態轉移的 diff 無法閱讀。
-4. 每個 issue 進 done 時一次 commit 狀態到 main。中間轉移只寫檔不 commit，崩潰後從檔案讀，沒有損失。全部轉移都 commit 的話七個 issue 會產生四十幾個雜訊 commit。
+4. 每個 issue 進 done 時一次 commit 狀態到 base branch。中間轉移只寫檔不 commit，崩潰後從檔案讀，沒有損失。全部轉移都 commit 的話七個 issue 會產生四十幾個雜訊 commit。
 
 ### 來源過期偵測
 
@@ -473,7 +474,7 @@ orchestrator 持有狀態並依狀態 spawn 對應的 subprocess。不是 coder 
 | chat | 對話，cwd 在 main checkout，`--disallowedTools Write Edit` | `{group_md, issues:[{title, body, blocked_by[], e2e, needs_human}]}` |
 | coder | group 描述 + issue + 前次失敗紀錄 | `{done, summary, files_changed[]}` |
 | issue reviewer | group 描述 + issue + `git diff <base_sha>..HEAD` | `{verdict, comments[]}` |
-| group reviewer | group 描述 + 全部 issue + `git diff main...issue-group/<NNNN>-<slug>` | `{comments[]}`，沒有 verdict，因為它不決定流程 |
+| group reviewer | group 描述 + 全部 issue + `git diff <base-branch>...issue-group/<NNNN>-<slug>` | `{comments[]}`，沒有 verdict，因為它不決定流程 |
 
 coder 在交棒前自己跑一次 typecheck 與 unit test。這是 self-check，不是呼叫 tester；把編譯不過的東西丟給下一棒是浪費一整輪。
 
@@ -510,7 +511,7 @@ reviewer 同時負責判定測試品質：這些測試是在測行為還是在�
 | 角色 | 讀的 diff | 唯一能抓到的 |
 | --- | --- | --- |
 | issue reviewer | `git diff <base_sha>..HEAD` | 細節：這個改動有沒有做對自己的事、測試有沒有測到行為 |
-| group reviewer | `git diff main...issue-group/<NNNN>-<slug>` | 跨 issue 的一致性：重複的抽象、殘留的死碼、七個各自合理但疊起來歪掉的架構 |
+| group reviewer | `git diff <base-branch>...issue-group/<NNNN>-<slug>` | 跨 issue 的一致性：重複的抽象、殘留的死碼、七個各自合理但疊起來歪掉的架構 |
 
 issue reviewer 不能省：group reviewer 的 diff 太大看不清細節，而且錯誤在序列鏈上會複利。group reviewer 每個 group 只跑一次，七個 issue 的 group 總共多一次 LLM 呼叫。
 
@@ -590,7 +591,7 @@ schema 裡的 `needs_human` 是分類旗標不是狀態欄位，跟 `e2e` 同一
 
 全 TypeScript，單一 Node process。web server 與 orchestrator 同 process、同事件迴圈，狀態直接共享，不需要 IPC 或第二個 store。
 
-orchestrator 必須是單一事件迴圈：對 main 的 commit 必須序列化，且它是唯一的狀態寫入者。
+orchestrator 必須是單一事件迴圈：對 base branch 的 commit 必須序列化，且它是唯一的狀態寫入者。
 
 | 項目 | 選擇 |
 | --- | --- |
@@ -714,15 +715,15 @@ SQLite 存兩類東西：
 
 **運行時資料**：base_sha、session_id、review 意見全文、失敗紀錄、耗時、成本、重試計數。
 
-**設定**：workspace 清單與每個 workspace 的 `main_branch`、`port_range`、平行上限。在 web UI 上編輯。新增 workspace 時只輸入 repo 路徑。issues 資料夾與 worktree 位置不在內，它們固定在 `.loom/` 底下（見「核心概念」與「git 拓撲」）。
+**設定**：workspace 清單與每個 workspace 的 `base_branch`、`port_range`、平行上限。在 web UI 上編輯。新增 workspace 時只輸入 repo 路徑。issues 資料夾與 worktree 位置不在內，它們固定在 `.loom/` 底下（見「核心概念」與「git 拓撲」）。
 
 執行指令不存在設定裡，見下節。
 
 **`name` 與 `repo_path` 建立後不可改。** `name` 是 handle 的 key；`repo_path` 換掉等於換一個專案，而 `runs`、`issue_state`、`group_state` 全都掛在同一個 `workspace_id` 上，issue 檔案與 worktree 也都推導自它。那兩件事該是新增一個 workspace，不是編輯這一個。
 
-**改設定要等當前那一輪跑完（`PUT /settings` 回 409）。** `ctx.workspace` 是註冊當下的快照，所以存檔後整個 handle 換掉：舊排程器 `stop()`、用新的 workspace 重新 `registerWorkspace`，暫停狀態跟著搬過去。但 `stop()` 只清 timer -- 正在 `await` 的 `driveParent` 攔不住，它會拿著舊的 `main_branch` 把 rebase 與 merge 做完，跟剛存下去的設定對不上。所以有東西在跑時直接拒絕，不做中止：中止一個跑到一半的 coder 要處理 worktree 殘留與半完成的 commit，比「等它跑完」貴得多。
+**改設定要等當前那一輪跑完（`PUT /settings` 回 409）。** `ctx.workspace` 是註冊當下的快照，所以存檔後整個 handle 換掉：舊排程器 `stop()`、用新的 workspace 重新 `registerWorkspace`，暫停狀態跟著搬過去。但 `stop()` 只清 timer -- 正在 `await` 的 `driveParent` 攔不住，它會拿著舊的 `base_branch` 把 rebase 與 merge 做完，跟剛存下去的設定對不上。所以有東西在跑時直接拒絕，不做中止：中止一個跑到一半的 coder 要處理 worktree 殘留與半完成的 commit，比「等它跑完」貴得多。
 
-**issue 資料夾固定成 `.loom/issues`，不是設定。** 可設的值域實際上只有一個，卻要養一條路徑驗證（`..`、絕對路徑、指到 repo 根三種寫法都得擋，因為那個字串會被 `join` 進 `repo_path` 再交給 `git add`）加一整套設定 UI 與換資料夾時的確認流程。固定之後這些全部消失，`PUT /settings` 的 trust boundary 只剩 `main_branch`（會進 git 的參數列，限制在英數與 `. _ - /`）與三個數字欄位。
+**issue 資料夾固定成 `.loom/issues`，不是設定。** 可設的值域實際上只有一個，卻要養一條路徑驗證（`..`、絕對路徑、指到 repo 根三種寫法都得擋，因為那個字串會被 `join` 進 `repo_path` 再交給 `git add`）加一整套設定 UI 與換資料夾時的確認流程。固定之後這些全部消失，`PUT /settings` 的 trust boundary 只剩 `base_branch`（會進 git 的參數列，限制在英數與 `. _ - /`）與三個數字欄位。
 
 固定路徑要成立的前提是 `.loom/issues` 沒有被 `.gitignore` 蓋掉，這一點由 `commitStateChange` 的 `git add` 自己保證，見「目錄自我忽略」。
 
@@ -779,7 +780,7 @@ issue group 固定放 `<repo>/.loom/issues/`。人可以直接在底下建 `<NNN
 
 手寫的 issue 要宣告依賴就自己寫 front matter 的 `blocked_by`。正常執行照 issue 檔名（全域號）排序走，順序排對了空著也能跑。
 
-**採用 loom 之前就做完的 group：在 group 的狀態檔寫 `merged: true`。** 所有 issue 都 done 的 group 會聚合成 verifying，而 verifying 用的 worktree 只在派工時建立，那種 group 從沒派工過，路徑不存在。`merged: true` 讓它直接落進已合併那一列，也誠實描述事實 -- 那些程式碼早就在 main 了，沒有 diff 可驗、沒有 e2e 該跑。
+**採用 loom 之前就做完的 group：在 group 的狀態檔寫 `merged: true`。** 所有 issue 都 done 的 group 會聚合成 verifying，而 verifying 用的 worktree 只在派工時建立，那種 group 從沒派工過，路徑不存在。`merged: true` 讓它直接落進已合併那一列，也誠實描述事實 -- 那些程式碼早就在 base branch 了，沒有 diff 可驗、沒有 e2e 該跑。
 
 ### 執行指令由 package.json 提供
 
