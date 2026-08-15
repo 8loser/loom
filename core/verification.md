@@ -73,6 +73,6 @@ process 生命週期不交給 LLM 的理由：agent 超時被殺、自己崩掉�
 
 ### 失敗時的資訊傳遞
 
-orchestrator 把測試 stdout 存進 DB，coder 下一輪的 prompt 帶最後 200 行，加一句「完整輸出自己重跑 test_command 看」。
+orchestrator 把測試 stdout 存進 DB，接手 coder 的 `{handover_log}` 帶最後 200 行，加一句「完整輸出自己重跑 test_command 看」。
 
 全塞進 context 太貴，完全不給又逼它多跑一次。

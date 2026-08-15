@@ -34,6 +34,53 @@ branch、worktree、issues 目錄共用同一個 `<NNNN>-<slug>` token，三者�
 - `<slug>` 是 kebab-case 人類可讀名，可改；number 固定所以即使 slug 改了，branch／worktree 還認得出是同一個 group。
 - `<issue-no>` 是 issue 的全域編號（四位零補），作為檔名主檔名。同 group 裡的 issue 檔按全域號排序就是執行序。
 
+### 檔案格式
+
+issue 檔與 group 描述檔的欄位定義。**型別邊界鎖死在 flat string / bool / array-of-strings**：解析是 hand-rolled（見 [docs/frontmatter.md](../docs/frontmatter.md)），不引 YAML 套件，欄位長出巢狀結構解析會靜默壞掉；要擴欄位先確認型別仍在邊界內。
+
+**issue 檔 `<issue-no>.md`：**
+
+```
+---
+status: ready
+e2e: false
+blocked_by: []
+takes_over: null
+log: []
+---
+
+# <issue title>
+
+<body：描述、驗收條件>
+```
+
+| 欄位 | 型別 | 誰寫、何時 |
+| --- | --- | --- |
+| `status` | 十狀態之一 | orchestrator，每次轉移 |
+| `e2e` | bool | 定稿時配，之後不動 |
+| `blocked_by` | 全域 issue no 陣列 | 定稿時配；planning 產出裡的 title 引用在此時轉成實際編號 |
+| `takes_over` | 全域 issue no 或 null | 接手 issue 開檔時配一次，指回它接手的 issue |
+| `log` | string 陣列 | orchestrator，每個階段結束 append 一行 |
+
+**group 描述檔 `group.md`：**
+
+```
+---
+merged: false
+blocked_reason: null
+---
+
+<group 描述 body>
+```
+
+規則：
+
+1. **front matter 是 orchestrator 的禁臠，人與 planning 只寫 body。** 唯一寫入者在 main checkout（見 [git.md](git.md) 的「狀態寫入」）。
+2. **log 永不進 body。** `source_hash` hash 的正是兩個 body（見 [state-machine.md](state-machine.md) 的「來源過期偵測」），issue done 之後往 body append 東西會讓它誤報過期。
+3. **log 行格式是 `<phase>:<result>[:一句摘要]`**，如 `implement:ok files=3`、`review:reject:測試只測實作細節,未測行為`。不帶時間戳：順序即資訊，精確時間在 DB 的 runs 表，加了只讓每次轉移的 diff 更吵。
+4. **分界是「這份資料死了會不會傷狀態機」。** 會的進檔案（`log` 行、`takes_over`——交接鏈斷了 retry_loop 追不了）；不會的進 DB（review 意見全文、測試輸出、session id、耗時、成本）。
+5. 人手寫的 issue 缺 front matter 時由 `loadIssues` 就地補最小一份，落點 draft（見 [impl.md](../impl.md) 的「人手寫的 issue group」）。
+
 ## 準則清單
 
 散在各節的結構與流程規則，開發時照這份查；理由與細節在對應小節。**這份是指引索引，不是規格本身——有衝突時以各節內文為準。**
@@ -43,6 +90,7 @@ branch、worktree、issues 目錄共用同一個 `<NNNN>-<slug>` token，三者�
 - issue group 不是 issue；lane 顯示 issue group，card 顯示 issue。
 - issue group 提供：prompt context、衝突域、kanban swimlane、merge 單位；一條 `issue-group/<NNNN>-<slug>` 分支、一個 worktree。命名規則見 [命名規則](#命名規則)。
 - 檔案固定放 `<repo>/.loom/issues/<NNNN>-<slug>/`，位置不可設。group 序號內嵌路徑與 branch；卡片顯示全域 issue `#0001`。
+- issue 檔與 group.md 的欄位集、`log` 行格式見 [檔案格式](#檔案格式)。
 - group 狀態**一律由內部 issue 聚合算出**，狀態檔只有 `merged` 與 `blocked_reason`（issue 推不出來的事實）。不做兩層狀態同步。
 
 ### 狀態機

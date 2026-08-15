@@ -113,5 +113,5 @@ base_sha 同時提供「退回 issue 開工前」的能力，重試策略依賴�
 
 1. **只有 orchestrator 在 main checkout 寫 front matter，agent 的 worktree 不碰 issues 資料夾。** 單邊修改 git 自動合併，雙邊寫同一個 YAML 就是衝突。
 2. merge 前檢查 diff 是否碰到 issues 路徑，碰到就 blocked。
-3. front matter 只放狀態機需要的欄位。review 意見全文、測試輸出、session id、耗時、成本進 DB。那些是幾 KB 的雜訊，塞進 git-tracked 檔案會讓每次狀態轉移的 diff 無法閱讀。
+3. front matter 只放 [concepts.md](concepts.md)「檔案格式」定義的欄位（狀態機欄位，加 `takes_over` 與 `log`）。review 意見全文、測試輸出、session id、耗時、成本進 DB。那些是幾 KB 的雜訊，塞進 git-tracked 檔案會讓每次狀態轉移的 diff 無法閱讀；`log` 每階段一行的形狀是刻意壓在這條規則內的。
 4. 每個 issue 進 done 時一次 commit 狀態到 base branch。中間轉移只寫檔不 commit，崩潰後從檔案讀，沒有損失。全部轉移都 commit 的話七個 issue 會產生四十幾個雜訊 commit。

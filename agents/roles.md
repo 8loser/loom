@@ -18,7 +18,7 @@ orchestrator 持有狀態並依狀態 spawn 對應的 subprocess。不是 coder 
 | --- | --- | --- |
 | chat | 對話，cwd 在 main checkout，`--tools Read,Glob,Grep` | rough draft：`{group_md, issues:[{title, body}]}` |
 | planning | chat 的 rough draft + orchestrator 餵的活 issue 檔案範圍 + base branch code | `{groups:[{slug, group_md, issues:[{title, body, blocked_by[], e2e, needs_human, touches[]}]}]}` |
-| coder | group 描述 + issue + 前次失敗紀錄 | `{done, summary, files_changed[]}` |
+| coder | group 描述 + issue + 交接紀錄（`{handover_log}`） | `{done, summary, files_changed[]}` |
 | issue reviewer | group 描述 + issue + `git diff <base_sha>..HEAD` | `{verdict, comments[]}` |
 | group reviewer | group 描述 + 全部 issue + `git diff <base-branch>...issue-group/<NNNN>-<slug>` | `{comments[]}`，沒有 verdict，因為它不決定流程 |
 

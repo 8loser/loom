@@ -35,7 +35,9 @@ git 這一類寫 group 層而不是 issue 層，因為它們全部發生在沒�
 
 ### 接手 issue 策略
 
-domain 失敗後開的接手 issue 一律從 base_sha 三段式清理後乾淨重寫，帶著前一個 issue 的失敗紀錄當警示，不繼承它的半成品 code。
+domain 失敗後開的接手 issue 一律從 base_sha 三段式清理後乾淨重寫，不繼承前一個 issue 的半成品 code。新 issue 檔的 front matter 帶 `takes_over: <issue-no>`（見 [concepts.md](concepts.md) 的「檔案格式」），失敗鏈因此在檔案層可追溯——`grep -l "takes_over: 0007" .loom/issues/*`——追 retry_loop 不必開 DB。
+
+**交接靠 `handover_log`，不靠抄檔。** orchestrator 組接手 coder 的 prompt 時，沿 `takes_over` 鏈收集每個 issue 的 `log` 行，加上最後一次失敗的詳情（review 意見、測試輸出 tail 200 行，從 DB 撈），組成 `{handover_log}` 變數。前手的 log 不抄進新檔：抄了兩份會漂移，新 issue 的 `log` 從空陣列開始，只記自己跑過的階段。
 
 理由：agent 反覆修同一份 code 時，裡面通常堆滿互相矛盾的嘗試痕跡，從頭寫比繼續補容易；公設 2 要求失敗不退回，接手 issue 從乾淨狀態重來就是這條原則的落實。同一條失敗鏈累計 2 個接手 issue 為上限，第 3 次把 group 標 `retry_loop` 等人看，避免自動加工作的迴圈失控。
 

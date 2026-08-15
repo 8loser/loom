@@ -36,7 +36,7 @@ human ──人改主意──▶ ready
 
 **`reviewing` 不是單一動作，而是同一欄位裡的兩個 phase。** 先由 reviewer 看 diff；review 通過後，同一張卡仍留在「審查中」欄，phase 變成 `test_verification`，顯示「驗證中」badge，由 orchestrator 重跑 typecheck／unit（必要時 e2e）。兩個 phase 都過才進 `done`；任一 phase 失敗就進 `failed` 終端（見下）。testing 不是主狀態，只是 `reviewing` 裡的驗證 phase。
 
-**`failed` 是 domain 失敗的終端，落實公設 2。** review reject、test fail、build fail 任一發生，issue 不退回重做，而是進 `failed` 終端；orchestrator 在同一個 group 自動開一個接手 issue，從 base_sha 三段式清理後乾淨重寫，帶著失敗紀錄當 `last_failure`。同一條失敗鏈累計 2 個接手 issue 為上限，第 3 次把 group 標成 `blocked_reason: retry_loop` 等人看，理由同 e2e 迴圈。**單一 issue 上沒有「第 N 次嘗試」這個欄位**——重試次數屬於 group 層級的失敗鏈計數，在看板上顯示為 lane 的 badge，不是 card 的屬性。
+**`failed` 是 domain 失敗的終端，落實公設 2。** review reject、test fail、build fail 任一發生，issue 不退回重做，而是進 `failed` 終端；orchestrator 在同一個 group 自動開一個接手 issue，從 base_sha 三段式清理後乾淨重寫，帶著交接紀錄：新 issue 的 `takes_over` 指回原 issue，`handover_log` 變數餵進接手 coder 的 prompt（組法見 [failure-retry.md](failure-retry.md) 的「接手 issue 策略」）。同一條失敗鏈累計 2 個接手 issue 為上限，第 3 次把 group 標成 `blocked_reason: retry_loop` 等人看，理由同 e2e 迴圈。**單一 issue 上沒有「第 N 次嘗試」這個欄位**——重試次數屬於 group 層級的失敗鏈計數，在看板上顯示為 lane 的 badge，不是 card 的屬性。
 
 `draft` 只用於人手寫丟進 issues 資料夾的 issue（見 [impl.md](../impl.md) 的「人手寫的 issue group」）。chat 定稿產出的 issue 直接進 `ready` 或 `human`。
 

@@ -15,6 +15,8 @@ loom 的提示詞是內建的出廠預設，per-workspace 可在 web UI 覆寫�
 
 chat 的提示詞要產出 issue group 的問題、目標、限制、測試指引、跨 group 依賴，以及 issue 的順序、依賴、人類判斷需求與 e2e 需求。coder 不在無人值守階段新增需求或重新規劃 group，它只讀 group/issue 描述並完成當前 issue。
 
+**coder 的交接變數是 `{handover_log}`。** 內容是失敗鏈的階段紀錄加最後一次失敗的詳情（組法見 [core/failure-retry.md](../core/failure-retry.md) 的「接手 issue 策略」）；首次執行的 issue 這一段為空。reviewer 的提示詞不吃這個變數：乾淨 context 是 reviewer 獨立性的來源，交接紀錄對它屬於 coder 的自述。
+
 ### 專案背景
 
 **專案背景進 agent 的唯一管道是 `.loom/context.md`。** loom 讀它，填成 `{context_md}` 模板變數，coder 與兩個 reviewer 的提示詞裡都有一個 `<context>` 區塊。專案自己的 `CLAUDE.md`、`CONTEXT.md`、`CODING_STANDARDS.md` 都不參與，提示詞也不叫 agent 自己去找那些檔案 -- 那等於讓專案的環境決定 agent 看到什麼，跟「專案層擋掉」的立場衝突（見 [impl.md](../impl.md) 的「agent 繼承什麼環境」）。
